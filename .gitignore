@@ -1,0 +1,28 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Environment variables (NEVER commit these — contains secrets) ─────────────
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Runtime / build ───────────────────────────────────────────────────────────
+dist/
+build/
+.tmp/
+
+# ── Uploads (local temp files — real assets go to Cloudinary) ─────────────────
+uploads/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
