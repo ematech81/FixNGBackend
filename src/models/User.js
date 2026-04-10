@@ -8,11 +8,11 @@ const UserSchema = new mongoose.Schema(
       required: [true, 'Name is required'],
       trim: true,
     },
-    // Email is optional — only used for email/password login
+    // Email is optional — only used for email/password login.
+    // No unique index here; uniqueness is enforced at application level in the register
+    // controller so we avoid Mongoose sparse-index issues with null values.
     email: {
       type: String,
-      unique: true,
-      sparse: true,   // sparse index allows multiple docs with null email
       lowercase: true,
       trim: true,
       default: null,

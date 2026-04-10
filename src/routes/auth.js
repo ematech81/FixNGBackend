@@ -9,6 +9,8 @@ const {
   sendOTPHandler,
   verifyRegister,
   verifyLoginOTP,
+  becomeArtisan,
+  cancelArtisanRegistration,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
@@ -41,6 +43,12 @@ router.post(
 );
 
 router.post('/login', login);
+
+// ── Account upgrades ──────────────────────────────────────────────────────────
+// Customer → Artisan (creates ArtisanProfile, upgrades role)
+router.post('/become-artisan', protect, becomeArtisan);
+// Artisan → Customer (deletes ArtisanProfile, reverts role)
+router.post('/cancel-artisan-registration', protect, cancelArtisanRegistration);
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 router.get('/me', protect, getMe);

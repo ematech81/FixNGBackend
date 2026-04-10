@@ -29,6 +29,7 @@ exports.getOnboardingStatus = async (req, res) => {
         verificationStatus: profile.verificationStatus,
         onboardingComplete: profile.onboardingComplete,
         completedSteps: profile.completedSteps,
+        skippedSteps: profile.skippedSteps,
         rejectionReason: profile.rejectionReason,
         // Return partial data so frontend can show what's already uploaded
         profilePhoto: profile.profilePhoto?.url || null,
@@ -236,6 +237,8 @@ exports.uploadVerificationId = async (req, res) => {
       uploadedAt: new Date(),
     };
     profile.completedSteps.verificationId = true;
+    // Clear the skip flag — user is now uploading properly
+    profile.skippedSteps.verificationId = false;
 
     // If the profile was previously rejected, reset to pending review
     if (profile.verificationStatus === 'rejected') {
@@ -284,6 +287,8 @@ exports.uploadSkillVideo = async (req, res) => {
       uploadedAt: new Date(),
     };
     profile.completedSteps.skillVideo = true;
+    // Clear the skip flag — user is now uploading properly
+    profile.skippedSteps.skillVideo = false;
 
     await profile.save();
 
@@ -300,6 +305,67 @@ exports.uploadSkillVideo = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Video upload failed. Please try again.' });
+  }
+};
+
+// ─── POST /api/artisan/onboarding/skip-verification-id ───────────────────────
+// User chose to skip ID upload. Marks step as done (so routing advances) but
+// sets skippedSteps.verificationId = true so they stay ineligible for verification.
+exports.skipVerificationId = async (req, res) => {
+  try {
+    const profile = await ArtisanProfile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    profile.completedSteps.verificationId = true;
+    profile.skippedSteps.verificationId = true;
+
+    await profile.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Verification ID step skipped.',
+      data: {
+        completedSteps: profile.completedSteps,
+        skippedSteps: profile.skippedSteps,
+        onboardingComplete: profile.onboardingComplete,
+        verificationStatus: profile.verificationStatus,
+      },
+    });
+  } catch (err) {
+    console.error('skipVerificationId error:', err);
+    res.status(500).json({ success: false, message: 'Could not skip step. Please try again.' });
+  }
+};
+
+// ─── POST /api/artisan/onboarding/skip-skill-video ────────────────────────────
+// User chose to skip skill video. Same pattern as above.
+exports.skipSkillVideo = async (req, res) => {
+  try {
+    const profile = await ArtisanProfile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    profile.completedSteps.skillVideo = true;
+    profile.skippedSteps.skillVideo = true;
+
+    await profile.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Skill video step skipped.',
+      data: {
+        completedSteps: profile.completedSteps,
+        skippedSteps: profile.skippedSteps,
+        onboardingComplete: profile.onboardingComplete,
+        verificationStatus: profile.verificationStatus,
+      },
+    });
+  } catch (err) {
+    console.error('skipSkillVideo error:', err);
+    res.status(500).json({ success: false, message: 'Could not skip step. Please try again.' });
   }
 };
 

@@ -14,6 +14,8 @@ const {
   updateLocation,
   uploadVerificationId,
   uploadSkillVideo,
+  skipVerificationId,
+  skipSkillVideo,
   getSkillsList,
 } = require('../controllers/artisanController');
 const { updateBio } = require('../controllers/discoveryController');
@@ -44,10 +46,15 @@ router.post(
 
 router.post(
   '/onboarding/skill-video',
+  (req, _res, next) => { req.setTimeout(300000); next(); }, // 5-min timeout for large videos
   uploadVideoMiddleware,
   handleUploadError,
   uploadSkillVideo
 );
+
+// Skip optional steps
+router.post('/onboarding/skip-verification-id', skipVerificationId);
+router.post('/onboarding/skip-skill-video', skipSkillVideo);
 
 // Bio update
 router.post('/bio', updateBio);

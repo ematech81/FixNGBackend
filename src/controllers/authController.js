@@ -16,7 +16,7 @@ const buildAuthResponse = async (user, statusCode, res) => {
   let artisanProfile = null;
   if (user.role === 'artisan') {
     artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-      'verificationStatus onboardingComplete completedSteps stats badgeLevel'
+      'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel'
     );
   }
 
@@ -296,6 +296,95 @@ exports.register = async (req, res) => {
   }
 };
 
+// ─── POST /api/auth/become-artisan ───────────────────────────────────────────
+// Called by a logged-in customer who wants to become an artisan.
+// Creates an ArtisanProfile and upgrades the user's role to 'artisan'.
+exports.becomeArtisan = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Idempotent — if they already have a profile, just return it
+    let profile = await ArtisanProfile.findOne({ userId });
+    if (!profile) {
+      profile = await ArtisanProfile.create({ userId });
+      await User.findByIdAndUpdate(userId, { role: 'artisan' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Artisan profile created. Complete onboarding to start receiving jobs.',
+      artisanProfile: {
+        verificationStatus: profile.verificationStatus,
+        onboardingComplete: profile.onboardingComplete,
+        completedSteps: profile.completedSteps,
+      },
+    });
+  } catch (err) {
+    console.error('becomeArtisan error:', err);
+    res.status(500).json({ success: false, message: 'Could not start artisan onboarding. Try again.' });
+  }
+};
+
+// ─── POST /api/auth/cancel-artisan-registration ──────────────────────────────
+// Called when an artisan-in-progress wants to abort and return to customer mode.
+// Deletes the ArtisanProfile (including any Cloudinary uploads) and reverts role.
+exports.cancelArtisanRegistration = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = req.user;
+
+    if (user.role !== 'artisan') {
+      return res.status(400).json({ success: false, message: 'Account is not in artisan registration.' });
+    }
+
+    const profile = await ArtisanProfile.findOne({ userId });
+    if (profile) {
+      // Clean up Cloudinary assets before deletion
+      const cloudinary = require('../config/cloudinary');
+      const toDelete = [];
+      if (profile.profilePhoto?.publicId) toDelete.push({ id: profile.profilePhoto.publicId, type: 'image' });
+      if (profile.verificationId?.publicId) toDelete.push({ id: profile.verificationId.publicId, type: 'image' });
+      if (profile.skillVideo?.publicId) toDelete.push({ id: profile.skillVideo.publicId, type: 'video' });
+
+      await Promise.allSettled(
+        toDelete.map(({ id, type }) =>
+          cloudinary.uploader.destroy(id, { resource_type: type }).catch(() => {})
+        )
+      );
+
+      await ArtisanProfile.findByIdAndDelete(profile._id);
+    }
+
+    // Revert role to customer
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { role: 'customer' },
+      { new: true }
+    );
+
+    const token = require('jsonwebtoken').sign({ id: updatedUser._id }, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRES_IN || '30d',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Artisan registration cancelled. You are now a customer.',
+      token,
+      user: {
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        role: updatedUser.role,
+        authMethod: updatedUser.authMethod,
+      },
+    });
+  } catch (err) {
+    console.error('cancelArtisanRegistration error:', err);
+    res.status(500).json({ success: false, message: 'Could not cancel registration. Please try again.' });
+  }
+};
+
 // ─── GET /api/auth/me ─────────────────────────────────────────────────────────
 exports.getMe = async (req, res) => {
   try {
@@ -304,7 +393,7 @@ exports.getMe = async (req, res) => {
 
     if (user.role === 'artisan') {
       artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-        'verificationStatus onboardingComplete completedSteps stats badgeLevel'
+        'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel'
       );
     }
 

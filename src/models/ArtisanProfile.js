@@ -74,6 +74,13 @@ const ArtisanProfileSchema = new mongoose.Schema(
       skillVideo: { type: Boolean, default: false },
     },
 
+    // Tracks which optional steps were deliberately skipped (not uploaded)
+    // Skipped artisans remain 'incomplete' and cannot receive verified badge or Pro features
+    skippedSteps: {
+      verificationId: { type: Boolean, default: false },
+      skillVideo: { type: Boolean, default: false },
+    },
+
     onboardingComplete: {
       type: Boolean,
       default: false,
@@ -132,32 +139,43 @@ const ArtisanProfileSchema = new mongoose.Schema(
 // 2dsphere index for geo-based artisan discovery
 ArtisanProfileSchema.index({ location: '2dsphere' });
 
-// Virtual: check if all 5 steps are done
+// Virtual: check if all 5 steps are done (upload or skip counts)
 ArtisanProfileSchema.virtual('allStepsDone').get(function () {
   const s = this.completedSteps;
-  return s.profilePhoto && s.skills && s.location && s.verificationId && s.skillVideo;
+  const sk = this.skippedSteps || {};
+  return s.profilePhoto && s.skills && s.location &&
+    (s.verificationId || sk.verificationId) &&
+    (s.skillVideo || sk.skillVideo);
 });
 
 // Before saving, auto-set onboardingComplete, status, and badgeLevel
 ArtisanProfileSchema.pre('save', function (next) {
   const s = this.completedSteps;
-  const allDone = s.profilePhoto && s.skills && s.location && s.verificationId && s.skillVideo;
+  const sk = this.skippedSteps || {};
+
+  // A step counts as "done" when either uploaded OR deliberately skipped
+  const step4Done = s.verificationId || sk.verificationId;
+  const step5Done = s.skillVideo || sk.skillVideo;
+  const allDone = s.profilePhoto && s.skills && s.location && step4Done && step5Done;
+
+  // All five steps actually uploaded (no skips) — eligible for admin review
+  const allUploaded = s.profilePhoto && s.skills && s.location && s.verificationId && s.skillVideo;
+  const noneSkipped = !sk.verificationId && !sk.skillVideo;
 
   if (allDone && !this.onboardingComplete) {
     this.onboardingComplete = true;
-    // Only move to pending if currently incomplete (don't override verified/rejected)
-    if (this.verificationStatus === 'incomplete') {
-      this.verificationStatus = 'pending';
-    }
+  }
+
+  // Only move to 'pending' (admin review queue) when every upload is complete and nothing was skipped
+  if (allUploaded && noneSkipped && this.verificationStatus === 'incomplete') {
+    this.verificationStatus = 'pending';
   }
 
   // Auto-compute badge level
   if (this.verificationStatus === 'verified') {
     const completed = this.stats.completedJobs;
     const avgRating = this.stats.averageRating;
-    if (completed >= 10 && avgRating >= 4.0 && this.stats.disputeCount === 0) {
-      this.badgeLevel = 'trusted';
-    } else if (completed >= 10 && avgRating >= 3.5) {
+    if (completed >= 10 && avgRating >= 3.5) {
       this.badgeLevel = 'trusted';
     } else {
       this.badgeLevel = 'verified';
