@@ -2,6 +2,7 @@ const Message = require('../models/Message');
 const Job = require('../models/Job');
 const cloudinary = require('../config/cloudinary');
 const { emitToUser } = require('../socket');
+const { notify } = require('./notificationController');
 
 // Phone number patterns to mask (Nigerian numbers + common formats)
 // We replace matched numbers with [phone hidden] to keep users in-app
@@ -135,6 +136,11 @@ exports.sendMessage = async (req, res) => {
 
     if (recipientId) {
       emitToUser(recipientId, 'new_message', payload);
+      notify(recipientId, 'new_message',
+        `New message from ${req.user.name}`,
+        masked.length > 80 ? masked.substring(0, 80) + '…' : masked,
+        { jobId, senderId: req.user._id.toString(), senderName: req.user.name }
+      );
     }
 
     res.status(201).json({ success: true, data: payload });
@@ -184,6 +190,11 @@ exports.sendImageMessage = async (req, res) => {
 
     if (recipientId) {
       emitToUser(recipientId, 'new_message', payload);
+      notify(recipientId, 'new_message',
+        `New photo from ${req.user.name}`,
+        'Sent you a photo in your job chat.',
+        { jobId, senderId: req.user._id.toString(), senderName: req.user.name }
+      );
     }
 
     res.status(201).json({ success: true, data: payload });

@@ -53,4 +53,18 @@ router.post('/cancel-artisan-registration', protect, cancelArtisanRegistration);
 // ── Shared ────────────────────────────────────────────────────────────────────
 router.get('/me', protect, getMe);
 
+// ── Push notification token registration ──────────────────────────────────────
+router.post('/push-token', protect, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ success: false, message: 'Token is required.' });
+    const User = require('../models/User');
+    await User.findByIdAndUpdate(req.user._id, { expoPushToken: token });
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('push-token error:', err);
+    res.status(500).json({ success: false, message: 'Failed to save push token.' });
+  }
+});
+
 module.exports = router;

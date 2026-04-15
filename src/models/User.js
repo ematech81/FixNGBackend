@@ -50,6 +50,11 @@ const UserSchema = new mongoose.Schema(
       enum: ['phone', 'email'],
       default: 'phone',
     },
+    // Expo push token — updated each time the app registers on a device
+    expoPushToken: {
+      type: String,
+      default: null,
+    },
     // Trusted device IDs — OTP is skipped for known devices
     knownDevices: {
       type: [

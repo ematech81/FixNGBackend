@@ -103,15 +103,7 @@ exports.updateSkills = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Select at least one skill.' });
     }
 
-    // Validate against the known skills list
-    const invalidSkills = skills.filter((s) => !ARTISAN_SKILLS.includes(s));
-    if (invalidSkills.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid skills: ${invalidSkills.join(', ')}`,
-      });
-    }
-
+    // Validate only length — free-form entries (e.g. via "Others") are allowed
     if (skills.length > 5) {
       return res.status(400).json({
         success: false,
@@ -148,25 +140,29 @@ exports.updateLocation = async (req, res) => {
   try {
     const { latitude, longitude, address, state, lga } = req.body;
 
-    if (!latitude || !longitude) {
-      return res.status(400).json({
-        success: false,
-        message: 'GPS coordinates are required. Enable location or enter manually.',
-      });
-    }
-
-    const lat = parseFloat(latitude);
-    const lng = parseFloat(longitude);
-
-    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return res.status(400).json({ success: false, message: 'Invalid coordinates.' });
-    }
-
     if (!address || !state) {
       return res.status(400).json({
         success: false,
         message: 'Address and state are required.',
       });
+    }
+
+    // Coordinates are optional — artisans who cannot use GPS submit address only.
+    // Fall back to Nigeria geographic centre so the GeoJSON Point is always valid.
+    const NIGERIA_CENTRE = { lat: 9.082, lng: 8.6753 };
+    let lat = NIGERIA_CENTRE.lat;
+    let lng = NIGERIA_CENTRE.lng;
+
+    if (latitude != null && longitude != null) {
+      const parsedLat = parseFloat(latitude);
+      const parsedLng = parseFloat(longitude);
+      if (!isNaN(parsedLat) && !isNaN(parsedLng) &&
+          parsedLat >= -90 && parsedLat <= 90 &&
+          parsedLng >= -180 && parsedLng <= 180 &&
+          !(parsedLat === 0 && parsedLng === 0)) {
+        lat = parsedLat;
+        lng = parsedLng;
+      }
     }
 
     const profile = await ArtisanProfile.findOne({ userId: req.user._id });

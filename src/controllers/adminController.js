@@ -4,6 +4,7 @@ const Job = require('../models/Job');
 const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
 const { emitToUser } = require('../socket');
+const { notify } = require('./notificationController');
 
 // ─── GET /api/admin/users — List all users with filters ──────────────────────
 exports.getUsers = async (req, res) => {
@@ -119,6 +120,11 @@ exports.verifyArtisan = async (req, res) => {
     emitToUser(req.params.artisanUserId, 'profile_verified', {
       message: 'Your profile has been verified! You can now receive job requests.',
     });
+    notify(req.params.artisanUserId, 'profile_verified',
+      'Profile Verified',
+      'Congratulations! Your profile has been verified. You can now receive job requests.',
+      {}
+    );
 
     res.status(200).json({ success: true, message: 'Artisan verified.' });
   } catch (err) {
@@ -148,6 +154,11 @@ exports.rejectArtisan = async (req, res) => {
       reason: profile.rejectionReason,
       message: 'Your profile was not approved. Please review the feedback and resubmit.',
     });
+    notify(req.params.artisanUserId, 'profile_rejected',
+      'Profile Verification Rejected',
+      `Your profile was not approved. Reason: ${profile.rejectionReason}`,
+      {}
+    );
 
     res.status(200).json({ success: true, message: 'Artisan rejected.' });
   } catch (err) {
@@ -164,7 +175,7 @@ exports.warnArtisan = async (req, res) => {
     if (!reason?.trim()) {
       return res.status(400).json({ success: false, message: 'Warning reason is required.' });
     }
-
+ 
     const profile = await ArtisanProfile.findOneAndUpdate(
       { userId: req.params.artisanUserId },
       { $inc: { warningCount: 1 } },
@@ -178,6 +189,11 @@ exports.warnArtisan = async (req, res) => {
       warningCount: profile.warningCount,
       message: `Warning #${profile.warningCount}: ${reason.trim()}`,
     });
+    notify(req.params.artisanUserId, 'account_warning',
+      `Account Warning #${profile.warningCount}`,
+      reason.trim(),
+      {}
+    );
 
     res.status(200).json({
       success: true,
@@ -194,7 +210,7 @@ exports.warnArtisan = async (req, res) => {
 exports.suspendArtisan = async (req, res) => {
   try {
     const { reason } = req.body;
-
+ 
     if (!reason?.trim()) {
       return res.status(400).json({ success: false, message: 'Suspension reason is required.' });
     }
@@ -211,6 +227,11 @@ exports.suspendArtisan = async (req, res) => {
       reason: reason.trim(),
       message: 'Your account has been suspended. Contact support to appeal.',
     });
+    notify(req.params.artisanUserId, 'account_suspended',
+      'Account Suspended',
+      `Your account has been suspended. Reason: ${reason.trim()}`,
+      {}
+    );
 
     res.status(200).json({ success: true, message: 'Artisan suspended.' });
   } catch (err) {
@@ -230,6 +251,11 @@ exports.unsuspendArtisan = async (req, res) => {
     emitToUser(req.params.artisanUserId, 'account_unsuspended', {
       message: 'Your suspension has been lifted. You can now receive jobs again.',
     });
+    notify(req.params.artisanUserId, 'account_unsuspended',
+      'Suspension Lifted',
+      'Your account suspension has been lifted. You can now receive job requests again.',
+      {}
+    );
 
     res.status(200).json({ success: true, message: 'Artisan unsuspended.' });
   } catch (err) {
@@ -388,6 +414,11 @@ exports.resolveDispute = async (req, res) => {
         resolution: resolution.trim(),
         message: 'The admin has resolved your dispute.',
       });
+      notify(id, 'dispute_resolved',
+        'Dispute Resolved',
+        `Your dispute has been resolved. Resolution: ${resolution.trim()}`,
+        { jobId: job._id.toString() }
+      );
     });
 
     res.status(200).json({ success: true, message: 'Dispute resolved.' });

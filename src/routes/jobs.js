@@ -16,11 +16,11 @@ const {
 } = require('../controllers/jobController');
 const { rateJob } = require('../controllers/discoveryController');
 
-// ── Customer routes ────────────────────────────────────────────────────────────
+// ── Job creation — customers and verified artisans can both post jobs ─────────
 router.post(
   '/',
   protect,
-  restrictTo('customer'),
+  restrictTo('customer', 'artisan'),
   uploadJobImages,
   handleUploadError,
   createJob

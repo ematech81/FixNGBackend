@@ -34,7 +34,7 @@ const JobSchema = new mongoose.Schema(
     ],
     urgency: {
       type: String,
-      enum: ['normal', 'emergency'],
+      enum: ['normal', 'emergency', 'remote'],
       default: 'normal',
     },
 
@@ -85,7 +85,7 @@ const JobSchema = new mongoose.Schema(
 
     // ── Dispute ───────────────────────────────────────────────────────────────
     dispute: {
-      raisedBy: { type: String, enum: ['customer', 'artisan'], default: null },
+      raisedBy: { type: String, default: null },   // 'customer' | 'artisan' | null
       reason: { type: String, default: null },
       resolution: { type: String, default: null },
       resolvedAt: { type: Date, default: null },
@@ -109,7 +109,7 @@ const JobSchema = new mongoose.Schema(
 
     // ── Cancellation ──────────────────────────────────────────────────────────
     cancellation: {
-      cancelledBy: { type: String, enum: ['customer', 'artisan', 'admin'], default: null },
+      cancelledBy: { type: String, default: null },  // 'customer' | 'artisan' | 'admin' | null
       reason: { type: String, default: null },
     },
 

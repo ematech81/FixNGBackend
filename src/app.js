@@ -24,8 +24,11 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/artisan', require('./routes/artisan'));
 app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api/artisans', require('./routes/artisans'));  // discovery + public profiles
-app.use('/api/chat', require('./routes/chat'));           // in-app messaging
-app.use('/api/admin', require('./routes/admin'));         // admin panel
+app.use('/api/chat', require('./routes/chat'));                   // in-app messaging
+app.use('/api/admin', require('./routes/admin'));               // admin panel
+app.use('/api/notifications',  require('./routes/notifications'));   // notification history
+app.use('/api/subscriptions',  require('./routes/subscriptions'));   // subscription & billing
+app.use('/api/reviews',        require('./routes/reviews'));         // user review history
 
 // Health check
 app.get('/api/health', (req, res) => {

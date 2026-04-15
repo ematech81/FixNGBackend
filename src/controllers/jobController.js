@@ -3,6 +3,7 @@ const ArtisanProfile = require('../models/ArtisanProfile');
 const User = require('../models/User');
 const cloudinary = require('../config/cloudinary');
 const { emitToUsers, emitToUser } = require('../socket');
+const { notify } = require('./notificationController');
 
 // Search radius in meters — artisans within this range get notified
 const NORMAL_JOB_RADIUS_METERS = 10000;  // 10km
@@ -24,7 +25,7 @@ const deleteJobImages = async (images = []) => {
 // ─── POST /api/jobs — Customer creates a job ─────────────────────────────────
 exports.createJob = async (req, res) => {
   try {
-    const { category, description, urgency, latitude, longitude, address, state, lga } = req.body;
+    const { category, description, urgency, latitude, longitude, address, state, lga, artisanId } = req.body;
 
     // Validate required fields
     if (!category || !description) {
@@ -48,12 +49,14 @@ exports.createJob = async (req, res) => {
       publicId: f.filename,
     }));
 
-    // Emergency jobs get a 2-hour window; normal jobs stay open for 24hrs
-    const expiresAt = new Date(
-      Date.now() + (urgency === 'emergency' ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000)
-    );
+    // remote = 7 days, emergency = 2 hours, normal = 24 hours
+    const expiryMs =
+      urgency === 'remote'    ? 7 * 24 * 60 * 60 * 1000 :
+      urgency === 'emergency' ? 2 * 60 * 60 * 1000 :
+                                24 * 60 * 60 * 1000;
+    const expiresAt = new Date(Date.now() + expiryMs);
 
-    const job = await Job.create({
+    const jobDoc = {
       customerId: req.user._id,
       category,
       description,
@@ -67,30 +70,26 @@ exports.createJob = async (req, res) => {
         lga: lga || null,
       },
       expiresAt,
-    });
+    };
 
-    // ── Find nearby verified artisans with matching skill ──────────────────────
-    const radius = urgency === 'emergency' ? EMERGENCY_JOB_RADIUS_METERS : NORMAL_JOB_RADIUS_METERS;
+    // Direct request to a specific artisan — assign immediately
+    if (artisanId) {
+      jobDoc.assignedArtisanId = artisanId;
+    }
 
-    const nearbyProfiles = await ArtisanProfile.find({
-      verificationStatus: 'verified',
-      skills: category,
-      location: {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [lng, lat] },
-          $maxDistance: radius,
-        },
-      },
-    }).select('userId').lean();
+    const job = await Job.create(jobDoc);
 
-    const artisanUserIds = nearbyProfiles.map((p) => p.userId);
+    // ── Notify artisans ────────────────────────────────────────────────────────
+    let artisanUserIds = [];
+    let targetArtisanName = null;
 
-    if (artisanUserIds.length > 0) {
-      // Record who was notified
+    if (artisanId) {
+      // Direct request: notify only the chosen artisan
+      const targetUser = await User.findById(artisanId).select('name').lean();
+      targetArtisanName = targetUser?.name || null;
+      artisanUserIds = [artisanId];
       await Job.findByIdAndUpdate(job._id, { notifiedArtisans: artisanUserIds });
-
-      // Emit real-time notification to each artisan
-      emitToUsers(artisanUserIds, 'new_job', {
+      emitToUser(artisanId.toString(), 'new_job', {
         jobId: job._id,
         category: job.category,
         urgency: job.urgency,
@@ -99,17 +98,72 @@ exports.createJob = async (req, res) => {
         state: job.location.state,
         createdAt: job.createdAt,
         expiresAt: job.expiresAt,
+        isDirect: true,
       });
+      notify(artisanId, 'new_job',
+        'New Direct Job Request',
+        `New ${job.category} job: ${job.description.substring(0, 80)}`,
+        { jobId: job._id.toString() }
+      );
+    } else {
+      // Broadcast: notify nearby verified artisans with matching skill
+      let nearbyProfiles;
+      if (urgency === 'remote') {
+        nearbyProfiles = await ArtisanProfile.find({
+          verificationStatus: 'verified',
+          skills: category,
+        }).select('userId').lean();
+      } else {
+        const radius = urgency === 'emergency' ? EMERGENCY_JOB_RADIUS_METERS : NORMAL_JOB_RADIUS_METERS;
+        nearbyProfiles = await ArtisanProfile.find({
+          verificationStatus: 'verified',
+          skills: category,
+          location: {
+            $near: {
+              $geometry: { type: 'Point', coordinates: [lng, lat] },
+              $maxDistance: radius,
+            },
+          },
+        }).select('userId').lean();
+      }
+
+      artisanUserIds = nearbyProfiles.map((p) => p.userId);
+
+      if (artisanUserIds.length > 0) {
+        await Job.findByIdAndUpdate(job._id, { notifiedArtisans: artisanUserIds });
+        emitToUsers(artisanUserIds, 'new_job', {
+          jobId: job._id,
+          category: job.category,
+          urgency: job.urgency,
+          description: job.description.substring(0, 120),
+          address: job.location.address,
+          state: job.location.state,
+          createdAt: job.createdAt,
+          expiresAt: job.expiresAt,
+        });
+        // Persist notification for each notified artisan (non-blocking)
+        const area = job.location.state || job.location.address || 'your area';
+        artisanUserIds.forEach((uid) =>
+          notify(uid, 'job_broadcast',
+            'New Job Near You',
+            `${job.category} job in ${area}. ${job.description.substring(0, 60)}`,
+            { jobId: job._id.toString() }
+          )
+        );
+      }
     }
 
     res.status(201).json({
       success: true,
-      message: 'Job created. Nearby artisans are being notified.',
+      message: artisanId
+        ? 'Job request sent to artisan.'
+        : 'Job created. Nearby artisans are being notified.',
       data: {
         jobId: job._id,
         status: job.status,
         urgency: job.urgency,
         artisansNotified: artisanUserIds.length,
+        targetArtisanName,
         expiresAt: job.expiresAt,
       },
     });
@@ -201,6 +255,12 @@ exports.acceptJob = async (req, res) => {
       estimatedArrivalMinutes: job.estimatedArrivalMinutes,
       agreedPrice: job.agreedPrice,
     });
+    const eta = job.estimatedArrivalMinutes ? ` ETA: ${job.estimatedArrivalMinutes} mins.` : '';
+    notify(job.customerId, 'job_accepted',
+      'Artisan Accepted Your Job',
+      `${artisan.name} has accepted your ${job.category} request.${eta}`,
+      { jobId: job._id.toString(), senderName: artisan.name }
+    );
 
     // Notify other artisans who were notified that job is now taken
     const othersToNotify = job.notifiedArtisans.filter(
@@ -248,6 +308,17 @@ exports.declineJob = async (req, res) => {
       await job.save();
     }
 
+    // Notify customer only on direct requests (assignedArtisanId was set at creation)
+    const wasDirectRequest = job.assignedArtisanId?.toString() === req.user._id.toString();
+    if (wasDirectRequest) {
+      const decliningArtisan = await User.findById(req.user._id).select('name').lean();
+      notify(job.customerId, 'job_declined',
+        'Job Request Declined',
+        `${decliningArtisan?.name || 'The artisan'} is unavailable for your ${job.category} request.`,
+        { jobId: job._id.toString() }
+      );
+    }
+
     res.status(200).json({ success: true, message: 'Job declined.' });
   } catch (err) {
     console.error(err);
@@ -292,6 +363,11 @@ exports.markArrived = async (req, res) => {
       arrivedAt: now,
       status: 'in-progress',
     });
+    notify(job.customerId, 'artisan_arrived',
+      'Artisan Has Arrived',
+      `Your ${job.category} artisan has arrived. Work is now in progress.`,
+      { jobId: job._id.toString() }
+    );
 
     res.status(200).json({
       success: true,
@@ -341,6 +417,11 @@ exports.markCompleted = async (req, res) => {
       completedAt: job.timeline.completedAt,
       message: 'Artisan has marked the job as complete. Please confirm and rate.',
     });
+    notify(job.customerId, 'job_completed',
+      'Job Completed — Please Rate',
+      `Your ${job.category} job has been marked complete. Tap to confirm and leave a review.`,
+      { jobId: job._id.toString() }
+    );
 
     res.status(200).json({
       success: true,
@@ -418,6 +499,12 @@ exports.raiseDispute = async (req, res) => {
         reason: reason.trim(),
         previousStatus: prevStatus,
       });
+      const raisedByLabel = raisedBy === 'customer' ? 'The customer' : 'The artisan';
+      notify(notifyUserId, 'dispute_raised',
+        'Dispute Raised',
+        `${raisedByLabel} has raised a dispute on your ${job.category} job. An admin will review within 24 hours.`,
+        { jobId: job._id.toString() }
+      );
     }
 
     res.status(200).json({
@@ -480,6 +567,12 @@ exports.cancelJob = async (req, res) => {
         cancelledBy,
         reason: job.cancellation.reason,
       });
+      const cancelledByLabel = cancelledBy === 'customer' ? 'The customer' : 'The artisan';
+      notify(notifyUserId, 'job_cancelled',
+        'Job Cancelled',
+        `${cancelledByLabel} has cancelled the ${job.category} job.`,
+        { jobId: job._id.toString() }
+      );
     }
 
     res.status(200).json({
