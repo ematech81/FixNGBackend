@@ -113,6 +113,20 @@ const ArtisanProfileSchema = new mongoose.Schema(
       default: 'new',
     },
 
+    // Pro status — granted via paid subscription or admin override
+    isPro: { type: Boolean, default: false },
+    proSource: {
+      type: String,
+      enum: ['subscription', 'admin'],
+      default: null,
+    },
+    proGrantedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    proGrantedAt: { type: Date, default: null },
+
     // Admin actions
     warningCount: { type: Number, default: 0 },
     isSuspended: { type: Boolean, default: false },

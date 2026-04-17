@@ -44,10 +44,18 @@ exports.createJob = async (req, res) => {
     }
 
     // Build images array from uploaded files
-    const images = (req.files || []).map((f) => ({
+    // req.files is an object when using multer.fields(): { images: [...], voiceDescription: [...] }
+    const imageFiles = Array.isArray(req.files) ? req.files : (req.files?.images || []);
+    const images = imageFiles.map((f) => ({
       url: f.path,
       publicId: f.filename,
     }));
+
+    // Optional voice description
+    const voiceFile = Array.isArray(req.files) ? null : req.files?.voiceDescription?.[0];
+    const voiceDescriptionDoc = voiceFile
+      ? { url: voiceFile.path, publicId: voiceFile.filename, duration: req.body.voiceDuration ? parseFloat(req.body.voiceDuration) : null }
+      : undefined;
 
     // remote = 7 days, emergency = 2 hours, normal = 24 hours
     const expiryMs =
@@ -71,6 +79,10 @@ exports.createJob = async (req, res) => {
       },
       expiresAt,
     };
+
+    if (voiceDescriptionDoc) {
+      jobDoc.voiceDescription = voiceDescriptionDoc;
+    }
 
     // Direct request to a specific artisan — assign immediately
     if (artisanId) {

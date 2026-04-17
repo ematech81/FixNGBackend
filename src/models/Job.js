@@ -32,6 +32,12 @@ const JobSchema = new mongoose.Schema(
         publicId: { type: String, required: true },
       },
     ],
+    // Optional voice note recorded by the customer when describing the job
+    voiceDescription: {
+      url: { type: String, default: null },
+      publicId: { type: String, default: null },
+      duration: { type: Number, default: null }, // seconds
+    },
     urgency: {
       type: String,
       enum: ['normal', 'emergency', 'remote'],

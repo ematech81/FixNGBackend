@@ -209,7 +209,7 @@ exports.warnArtisan = async (req, res) => {
 // ─── POST /api/admin/artisans/:artisanUserId/suspend ──────────────────────────
 exports.suspendArtisan = async (req, res) => {
   try {
-    const { reason } = req.body;
+    const { reason } = req.body;  
  
     if (!reason?.trim()) {
       return res.status(400).json({ success: false, message: 'Suspension reason is required.' });
@@ -425,6 +425,147 @@ exports.resolveDispute = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to resolve dispute.' });
+  }
+};
+
+// ─── GET /api/admin/users/list — Paginated user list with role filter ─────────
+// Distinct from /api/admin/users so it can include artisan isPro info
+exports.listUsers = async (req, res) => {
+  try {
+    const { role, page = 1, limit = 50, isPro } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const userQuery = {};
+    if (role === 'customer') userQuery.role = 'customer';
+    if (role && role !== 'customer') userQuery.role = role;
+
+    const users = await User.find(userQuery)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select('-password')
+      .lean();
+
+    const total = await User.countDocuments(userQuery);
+
+    // For artisans, attach profile info (skills, verificationStatus, isPro)
+    let result = users;
+    if (role === 'artisan' || !role) {
+      const artisanIds = users.filter((u) => u.role === 'artisan').map((u) => u._id);
+      const profiles = await ArtisanProfile.find({ userId: { $in: artisanIds } })
+        .select('userId skills verificationStatus badgeLevel isPro proSource isSuspended')
+        .lean();
+      const profileMap = {};
+      profiles.forEach((p) => { profileMap[p.userId.toString()] = p; });
+
+      result = users.map((u) => {
+        const profile = profileMap[u._id.toString()];
+        return {
+          ...u,
+          skills: profile?.skills || [],
+          verificationStatus: profile?.verificationStatus || null,
+          badgeLevel: profile?.badgeLevel || null,
+          isPro: profile?.isPro || false,
+          proSource: profile?.proSource || null,
+          isSuspended: profile?.isSuspended || false,
+        };
+      });
+
+      // Filter by isPro if requested
+      if (isPro === 'true') {
+        result = result.filter((u) => u.isPro);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+    });
+  } catch (err) {
+    console.error('listUsers error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch users.' });
+  }
+};
+
+// ─── POST /api/admin/users/:userId/toggle-active — Enable / disable a user ────
+exports.toggleUserActive = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    // Prevent admin from disabling themselves
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, message: 'You cannot disable your own account.' });
+    }
+
+    user.isActive = !user.isActive;
+    await user.save();
+
+    const action = user.isActive ? 'enabled' : 'disabled';
+    res.status(200).json({
+      success: true,
+      message: `User account ${action}.`,
+      data: { isActive: user.isActive },
+    });
+  } catch (err) {
+    console.error('toggleUserActive error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update user status.' });
+  }
+};
+
+// ─── POST /api/admin/artisans/:artisanUserId/grant-pro ────────────────────────
+// Admin manually grants Pro status to an artisan (bypasses subscription)
+exports.grantPro = async (req, res) => {
+  try {
+    const profile = await ArtisanProfile.findOneAndUpdate(
+      { userId: req.params.artisanUserId },
+      {
+        isPro: true,
+        proSource: 'admin',
+        proGrantedBy: req.user._id,
+        proGrantedAt: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
+
+    notify(req.params.artisanUserId, 'profile_verified',
+      'You\'re now a Pro! ⭐',
+      'Congratulations! You have been granted Pro status on FixNG. Your profile now appears first in search results.',
+      {}
+    );
+
+    res.status(200).json({ success: true, message: 'Pro status granted.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to grant Pro status.' });
+  }
+};
+
+// ─── POST /api/admin/artisans/:artisanUserId/revoke-pro ───────────────────────
+// Admin revokes Pro status (works for both subscription and admin grants)
+exports.revokePro = async (req, res) => {
+  try {
+    const profile = await ArtisanProfile.findOneAndUpdate(
+      { userId: req.params.artisanUserId },
+      { isPro: false, proSource: null, proGrantedBy: null, proGrantedAt: null },
+      { new: true }
+    );
+
+    if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
+
+    notify(req.params.artisanUserId, 'account_warning',
+      'Pro Status Removed',
+      'Your Pro status on FixNG has been removed.',
+      {}
+    );
+
+    res.status(200).json({ success: true, message: 'Pro status revoked.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to revoke Pro status.' });
   }
 };
 

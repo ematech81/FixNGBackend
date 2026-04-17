@@ -3,6 +3,8 @@ const router = express.Router();
 const { protect, restrictTo } = require('../middleware/auth');
 const {
   getUsers,
+  listUsers,
+  toggleUserActive,
   getArtisans,
   getArtisanDetail,
   verifyArtisan,
@@ -11,6 +13,8 @@ const {
   suspendArtisan,
   unsuspendArtisan,
   banArtisan,
+  grantPro,
+  revokePro,
   getJobs,
   getComplaints,
   resolveComplaint,
@@ -26,6 +30,8 @@ router.get('/stats', getDashboardStats);
 
 // Users
 router.get('/users', getUsers);
+router.get('/users/list', listUsers);
+router.post('/users/:userId/toggle-active', toggleUserActive);
 
 // Artisans
 router.get('/artisans', getArtisans);
@@ -36,6 +42,8 @@ router.post('/artisans/:artisanUserId/warn', warnArtisan);
 router.post('/artisans/:artisanUserId/suspend', suspendArtisan);
 router.post('/artisans/:artisanUserId/unsuspend', unsuspendArtisan);
 router.post('/artisans/:artisanUserId/ban', banArtisan);
+router.post('/artisans/:artisanUserId/grant-pro', grantPro);
+router.post('/artisans/:artisanUserId/revoke-pro', revokePro);
 
 // Jobs
 router.get('/jobs', getJobs);

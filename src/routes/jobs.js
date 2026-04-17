@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, restrictTo, requireVerified } = require('../middleware/auth');
-const { uploadJobImages, handleUploadError } = require('../middleware/upload');
+const { uploadJobMedia, handleUploadError } = require('../middleware/upload');
 const {
   createJob,
   getAvailableJobs,
@@ -21,7 +21,7 @@ router.post(
   '/',
   protect,
   restrictTo('customer', 'artisan'),
-  uploadJobImages,
+  uploadJobMedia,
   handleUploadError,
   createJob
 );

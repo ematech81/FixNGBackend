@@ -1,9 +1,32 @@
-const crypto       = require('crypto');
-const Subscription = require('../models/Subscription');
-const User         = require('../models/User');
-const PLANS        = require('../constants/subscriptionPlans');
+const crypto          = require('crypto');
+const Subscription    = require('../models/Subscription');
+const ArtisanProfile  = require('../models/ArtisanProfile');
+const User            = require('../models/User');
+const PLANS           = require('../constants/subscriptionPlans');
 const { initializeTransaction, verifyTransaction } = require('../services/paystackService');
-const { notify }   = require('./notificationController');
+const { notify }      = require('./notificationController');
+
+// ─── Helper: sync isPro on ArtisanProfile based on subscription state ──────────
+// source: 'subscription' | null (revoke)
+const syncProStatus = async (userId, active, source = 'subscription') => {
+  try {
+    if (active) {
+      await ArtisanProfile.findOneAndUpdate(
+        { userId },
+        { isPro: true, proSource: source, proGrantedAt: new Date() },
+        { new: true }
+      );
+    } else {
+      // Only revoke if the current source is 'subscription' — admin grants persist
+      await ArtisanProfile.findOneAndUpdate(
+        { userId, proSource: 'subscription' },
+        { isPro: false, proSource: null, proGrantedAt: null, proGrantedBy: null }
+      );
+    }
+  } catch (e) {
+    console.warn('syncProStatus failed (non-fatal):', e.message);
+  }
+};
 
 // ─── GET /api/subscriptions/plans — Public plan list ──────────────────────────
 exports.getPlans = async (req, res) => {
@@ -27,6 +50,8 @@ exports.getMySubscription = async (req, res) => {
         { userId: req.user._id },
         { status: 'expired', plan: 'free' }
       );
+      // Revoke subscription-based Pro status
+      await syncProStatus(req.user._id, false);
       sub.status = 'expired';
       sub.plan   = 'free';
     }
@@ -121,6 +146,11 @@ exports.verifySubscription = async (req, res) => {
       },
       { upsert: true, new: true }
     );
+
+    // Activate Pro status on the artisan's profile (pro and elite plans grant Pro)
+    if (['pro', 'elite'].includes(plan.id)) {
+      await syncProStatus(req.user._id, true, 'subscription');
+    }
 
     // Notify the user
     notify(req.user._id, 'profile_verified',  // reuse closest type

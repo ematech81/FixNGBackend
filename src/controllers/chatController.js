@@ -4,6 +4,64 @@ const cloudinary = require('../config/cloudinary');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 
+// ─── GET /api/chat/conversations — All job threads the user has chatted in ─────
+exports.getConversations = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // All jobs the user is a party to (any status)
+    const jobs = await Job.find({
+      $or: [{ customerId: userId }, { assignedArtisanId: userId }],
+    })
+      .populate('customerId', 'name')
+      .populate('assignedArtisanId', 'name')
+      .lean();
+
+    if (!jobs.length) return res.status(200).json({ success: true, data: [] });
+
+    const jobIds = jobs.map((j) => j._id);
+
+    // Aggregate: latest non-deleted message per job
+    const latestMessages = await Message.aggregate([
+      { $match: { jobId: { $in: jobIds }, isDeleted: false } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$jobId',
+          lastText: { $first: '$text' },
+          lastType: { $first: '$type' },
+          lastAt:   { $first: '$createdAt' },
+        },
+      },
+    ]);
+
+    const msgMap = {};
+    latestMessages.forEach((m) => { msgMap[m._id.toString()] = m; });
+
+    // Only return jobs that have at least one message, sorted newest-first
+    const conversations = jobs
+      .filter((j) => msgMap[j._id.toString()])
+      .map((j) => {
+        const msg = msgMap[j._id.toString()];
+        return {
+          ...j,
+          lastMessage: {
+            text: msg.lastType === 'image' ? '📷 Photo'
+                : msg.lastType === 'audio' ? '🎤 Voice note'
+                : (msg.lastText || ''),
+            at: msg.lastAt,
+          },
+        };
+      })
+      .sort((a, b) => new Date(b.lastMessage.at) - new Date(a.lastMessage.at));
+
+    res.status(200).json({ success: true, data: conversations });
+  } catch (err) {
+    console.error('getConversations error:', err);
+    res.status(500).json({ success: false, message: 'Failed to load conversations.' });
+  }
+};
+
 // Phone number patterns to mask (Nigerian numbers + common formats)
 // We replace matched numbers with [phone hidden] to keep users in-app
 const PHONE_PATTERNS = [
@@ -80,6 +138,8 @@ exports.getChatHistory = async (req, res) => {
         type: m.type,
         text: m.text,
         imageUrl: m.imageUrl,
+        audioUrl: m.audioUrl,
+        audioDuration: m.audioDuration,
         wasFiltered: m.wasFiltered,
         createdAt: m.createdAt,
       })),
@@ -147,6 +207,63 @@ exports.sendMessage = async (req, res) => {
   } catch (err) {
     console.error('sendMessage error:', err);
     res.status(500).json({ success: false, message: 'Failed to send message.' });
+  }
+};
+
+// ─── POST /api/chat/:jobId/audio — Send a voice note message ─────────────────
+exports.sendAudioMessage = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { duration } = req.body; // client sends recorded duration in seconds
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No audio file uploaded.' });
+    }
+
+    const access = await getJobAndVerifyAccess(jobId, req.user._id);
+    if (access.error) {
+      return res.status(access.status).json({ success: false, message: access.error });
+    }
+
+    const message = await Message.create({
+      jobId,
+      senderId: req.user._id,
+      type: 'audio',
+      audioUrl: req.file.path,
+      audioPublicId: req.file.filename,
+      audioDuration: duration ? parseFloat(duration) : null,
+    });
+
+    const { job } = access;
+    const recipientId = access.isCustomer
+      ? job.assignedArtisanId?.toString()
+      : job.customerId.toString();
+
+    const payload = {
+      id: message._id,
+      jobId,
+      senderId: req.user._id,
+      senderName: req.user.name,
+      senderRole: req.user.role,
+      type: 'audio',
+      audioUrl: req.file.path,
+      audioDuration: message.audioDuration,
+      createdAt: message.createdAt,
+    };
+
+    if (recipientId) {
+      emitToUser(recipientId, 'new_message', payload);
+      notify(recipientId, 'new_message',
+        `Voice note from ${req.user.name}`,
+        'Sent you a voice note in your job chat.',
+        { jobId, senderId: req.user._id.toString(), senderName: req.user.name }
+      );
+    }
+
+    res.status(201).json({ success: true, data: payload });
+  } catch (err) {
+    console.error('sendAudioMessage error:', err);
+    res.status(500).json({ success: false, message: 'Failed to send voice note.' });
   }
 };
 

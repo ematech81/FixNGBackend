@@ -46,6 +46,11 @@ exports.searchArtisans = async (req, res) => {
       query['stats.averageRating'] = { $gte: parseFloat(minRating) };
     }
 
+    // Filter to only Trusted (subscribed) artisans when requested
+    if (req.query.isPro === 'true') {
+      query.isPro = true;
+    }
+
     let profiles;
 
     if (latitude && longitude) {
@@ -53,7 +58,10 @@ exports.searchArtisans = async (req, res) => {
       const lng = parseFloat(longitude);
       const radiusMeters = parseFloat(maxDistance) * 1000;
 
-      profiles = await ArtisanProfile.find({
+      // $near doesn't support multi-key sort, so we fetch and sort in-memory.
+      // Fetch a larger pool so Pro artisans can bubble up after sort.
+      const fetchLimit = Math.max(parseInt(limit) * 3, 60);
+      const raw = await ArtisanProfile.find({
         ...query,
         location: {
           $near: {
@@ -63,16 +71,19 @@ exports.searchArtisans = async (req, res) => {
         },
       })
         .populate('userId', 'name')
-        .select('userId profilePhoto skills bio location stats badgeLevel')
-        .skip(skip)
-        .limit(parseInt(limit))
+        .select('userId profilePhoto skills bio location stats badgeLevel isPro proSource')
+        .limit(fetchLimit)
         .lean();
+
+      // Sort: Pro first, then by distance (preserved from $near order)
+      raw.sort((a, b) => (b.isPro ? 1 : 0) - (a.isPro ? 1 : 0));
+      profiles = raw.slice(skip, skip + parseInt(limit));
     } else {
-      // No location — return by rating desc
+      // No location — Pro first, then by rating desc
       profiles = await ArtisanProfile.find(query)
-        .sort({ 'stats.averageRating': -1, 'stats.completedJobs': -1 })
+        .sort({ isPro: -1, 'stats.averageRating': -1, 'stats.completedJobs': -1 })
         .populate('userId', 'name')
-        .select('userId profilePhoto skills bio location stats badgeLevel')
+        .select('userId profilePhoto skills bio location stats badgeLevel isPro proSource')
         .skip(skip)
         .limit(parseInt(limit))
         .lean();
@@ -96,6 +107,7 @@ exports.searchArtisans = async (req, res) => {
         address: p.location?.address || null,
         state: p.location?.state || null,
         badgeLevel: p.badgeLevel,
+        isPro: p.isPro || false,
         distanceKm,
         stats: {
           completedJobs: p.stats.completedJobs,
@@ -140,6 +152,7 @@ exports.getArtisanProfile = async (req, res) => {
         skills: profile.skills,
         bio: profile.bio,
         badgeLevel: profile.badgeLevel,
+        isPro: profile.isPro || false,
         location: {
           address: profile.location?.address || null,
           state: profile.location?.state || null,
@@ -242,6 +255,7 @@ exports.rateJob = async (req, res) => {
     const c = parseInt(communication);
     const overallScore = Math.round(((q + t + c) / 3) * 10) / 10;
 
+    // ── Critical: create the review document ─────────────────────────────────
     const review = await Review.create({
       jobId,
       customerId: req.user._id,
@@ -251,23 +265,36 @@ exports.rateJob = async (req, res) => {
       comment: comment?.trim() || null,
     });
 
-    // Update artisan average rating
-    const artisanProfile = await ArtisanProfile.findOne({ userId: job.assignedArtisanId });
-    if (artisanProfile) {
-      const prevTotal = artisanProfile.stats.totalRatings;
-      const prevAvg = artisanProfile.stats.averageRating;
-      const newTotal = prevTotal + 1;
-      const newAvg = (prevAvg * prevTotal + overallScore) / newTotal;
+    // ── Non-critical: update artisan stats ────────────────────────────────────
+    // Wrapped separately so a save() failure never blocks the review response.
+    try {
+      const artisanProfile = await ArtisanProfile.findOne({ userId: job.assignedArtisanId });
+      if (artisanProfile) {
+        const prevTotal = artisanProfile.stats.totalRatings;
+        const prevAvg   = artisanProfile.stats.averageRating;
+        const newTotal  = prevTotal + 1;
+        const newAvg    = (prevAvg * prevTotal + overallScore) / newTotal;
 
-      artisanProfile.stats.averageRating = Math.round(newAvg * 100) / 100;
-      artisanProfile.stats.totalRatings = newTotal;
-      await artisanProfile.save(); // triggers badge recomputation
+        artisanProfile.stats.averageRating = Math.round(newAvg * 100) / 100;
+        artisanProfile.stats.totalRatings  = newTotal;
+        await artisanProfile.save(); // triggers badge recomputation via pre-save hook
+      }
+    } catch (statsErr) {
+      console.error('rateJob: artisan stats update failed (non-fatal):', statsErr.message);
     }
 
-    // Store rating on job for quick access
-    await Job.findByIdAndUpdate(jobId, {
-      rating: { score: overallScore, review: comment?.trim() || null, ratedAt: new Date() },
-    });
+    // ── Non-critical: store rating on job for quick access ────────────────────
+    try {
+      await Job.findByIdAndUpdate(jobId, {
+        $set: {
+          'rating.score':   overallScore,
+          'rating.review':  comment?.trim() || null,
+          'rating.ratedAt': new Date(),
+        },
+      });
+    } catch (jobErr) {
+      console.error('rateJob: job rating update failed (non-fatal):', jobErr.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -275,8 +302,14 @@ exports.rateJob = async (req, res) => {
       data: { overallScore, reviewId: review._id },
     });
   } catch (err) {
-    console.error('rateJob error:', err);
-    res.status(500).json({ success: false, message: 'Failed to submit review.' });
+    console.error('rateJob error:', err.message);
+    // Return the actual Mongoose/validation message so it's visible in the app during debugging
+    const clientMessage = err.name === 'ValidationError'
+      ? Object.values(err.errors).map((e) => e.message).join('. ')
+      : err.code === 11000
+        ? 'You have already rated this job.'
+        : err.message || 'Failed to submit review.';
+    res.status(500).json({ success: false, message: clientMessage });
   }
 };
 

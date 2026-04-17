@@ -12,10 +12,10 @@ const MessageSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // 'text' | 'image'
+    // 'text' | 'image' | 'audio'
     type: {
       type: String,
-      enum: ['text', 'image'],
+      enum: ['text', 'image', 'audio'],
       default: 'text',
     },
     // For text messages
@@ -31,6 +31,19 @@ const MessageSchema = new mongoose.Schema(
     },
     imagePublicId: {
       type: String,
+      default: null,
+    },
+    // For audio (voice note) messages
+    audioUrl: {
+      type: String,
+      default: null,
+    },
+    audioPublicId: {
+      type: String,
+      default: null,
+    },
+    audioDuration: {
+      type: Number, // seconds
       default: null,
     },
     // True when a phone number or external contact was detected and masked

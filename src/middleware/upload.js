@@ -106,6 +106,67 @@ exports.uploadChatImage = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 }).single('image');
 
+// ─── Chat Audio (Voice Note) Storage ─────────────────────────────────────────
+const chatAudioStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, _file) => ({
+    folder: 'fixng/chat-audio',
+    resource_type: 'video', // Cloudinary uses 'video' resource_type for audio files
+    allowed_formats: ['mp3', 'm4a', 'aac', 'ogg', 'wav', 'mp4', 'caf'],
+    public_id: `voice_${req.user._id}_${Date.now()}`,
+  }),
+});
+
+const audioFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('audio/') || file.mimetype === 'video/mp4') {
+    return cb(null, true);
+  }
+  cb(new Error('Only audio files are allowed.'), false);
+};
+
+exports.uploadChatAudio = multer({
+  storage: chatAudioStorage,
+  fileFilter: audioFilter,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB — 3-min audio is typically < 5MB
+}).single('audio');
+
+// ─── Combined Job Media Storage (images + optional voice description) ─────────
+// Branches folder/resource_type based on fieldname so both can live in one upload
+const jobMediaStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    if (file.fieldname === 'voiceDescription') {
+      return {
+        folder: 'fixng/job-voice',
+        resource_type: 'video', // Cloudinary uses 'video' for audio
+        allowed_formats: ['mp3', 'm4a', 'aac', 'ogg', 'wav', 'mp4', 'caf'],
+        public_id: `jobvoice_${req.user._id}_${Date.now()}`,
+      };
+    }
+    return {
+      folder: 'fixng/job-images',
+      allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+      transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
+      public_id: `job_${req.user._id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    };
+  },
+});
+
+const jobMediaFilter = (req, file, cb) => {
+  if (file.fieldname === 'voiceDescription') return audioFilter(req, file, cb);
+  return imageFilter(req, file, cb);
+};
+
+// Replaces the old uploadJobImages — handles images[] + optional voiceDescription
+exports.uploadJobMedia = multer({
+  storage: jobMediaStorage,
+  fileFilter: jobMediaFilter,
+  limits: { fileSize: 20 * 1024 * 1024 },
+}).fields([
+  { name: 'images', maxCount: 5 },
+  { name: 'voiceDescription', maxCount: 1 },
+]);
+
 // ─── Multer error handler middleware ──────────────────────────────────────────
 exports.handleUploadError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
