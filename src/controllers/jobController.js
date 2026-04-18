@@ -1,9 +1,11 @@
 const Job = require('../models/Job');
 const ArtisanProfile = require('../models/ArtisanProfile');
 const User = require('../models/User');
+const Complaint = require('../models/Complaint');
 const cloudinary = require('../config/cloudinary');
 const { emitToUsers, emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
+const { TIER_LIMITS, getArtisanPlan } = require('../utils/subscriptionLimits');
 
 // Search radius in meters — artisans within this range get notified
 const NORMAL_JOB_RADIUS_METERS = 10000;  // 10km
@@ -249,6 +251,29 @@ exports.acceptJob = async (req, res) => {
       return res.status(400).json({ success: false, message: 'You previously declined this job.' });
     }
 
+    // Subscription tier limit check
+    const plan = await getArtisanPlan(req.user._id);
+    const limit = TIER_LIMITS[plan]?.maxActiveJobs ?? 2;
+
+    if (isFinite(limit)) {
+      const activeCount = await Job.countDocuments({
+        assignedArtisanId: req.user._id,
+        status: { $in: ['accepted', 'in-progress'] },
+      });
+      if (activeCount >= limit) {
+        const requiredPlan = plan === 'free' ? 'pro' : 'elite';
+        return res.status(403).json({
+          success: false,
+          limitReached: true,
+          currentPlan: plan,
+          requiredPlan,
+          message: plan === 'free'
+            ? `Free accounts can only accept ${limit} jobs at a time. Upgrade to Pro to accept up to 10.`
+            : `Pro accounts can only accept ${limit} jobs at a time. Upgrade to Elite for unlimited.`,
+        });
+      }
+    }
+
     // Accept
     job.status = 'accepted';
     job.assignedArtisanId = req.user._id;
@@ -490,6 +515,17 @@ exports.raiseDispute = async (req, res) => {
     job.timeline.disputedAt = new Date();
 
     await job.save();
+
+    // Create a Complaint record so the dispute appears in the admin dashboard
+    const againstUserId = isCustomer ? job.assignedArtisanId : job.customerId;
+    if (againstUserId) {
+      await Complaint.create({
+        jobId: job._id,
+        submittedBy: req.user._id,
+        againstUserId,
+        reason: `[${raisedBy === 'customer' ? 'Customer' : 'Artisan'} Dispute – ${job.category}] ${reason.trim()}`,
+      });
+    }
 
     // Update artisan dispute count
     if (isCustomer && job.assignedArtisanId) {

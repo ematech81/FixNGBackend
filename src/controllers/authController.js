@@ -16,7 +16,8 @@ const buildAuthResponse = async (user, statusCode, res) => {
   let artisanProfile = null;
   if (user.role === 'artisan') {
     artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-      'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel'
+      'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel ' +
+      'isSuspended suspensionReason isBanned banReason rejectionReason'
     );
   }
 
@@ -52,6 +53,17 @@ exports.checkDevice = async (req, res) => {
   try {
     const { normalizePhone } = require('../services/twilioService');
     const normalized = normalizePhone(phone.trim());
+
+    // Block banned devices before anything else
+    const bannedDeviceOwner = await User.findOne({ isActive: false, 'knownDevices.deviceId': deviceId.trim() });
+    if (bannedDeviceOwner) {
+      return res.status(403).json({
+        success: false,
+        isDeviceBanned: true,
+        message: 'This device has been blocked from FixNG.',
+      });
+    }
+
     const user = await User.findOne({ phone: normalized });
 
     if (!user) {
@@ -60,7 +72,11 @@ exports.checkDevice = async (req, res) => {
     }
 
     if (!user.isActive) {
-      return res.status(403).json({ success: false, message: 'Your account has been deactivated.' });
+      return res.status(403).json({
+        success: false,
+        isAccountDisabled: true,
+        message: 'Your account has been disabled. You are no longer allowed to use FixNG.',
+      });
     }
 
     const isKnownDevice = user.knownDevices.some((d) => d.deviceId === deviceId.trim());
@@ -138,9 +154,29 @@ exports.verifyRegister = async (req, res) => {
       return res.status(400).json({ success: false, message: result.reason });
     }
 
+    // Block banned devices from creating new accounts
+    const { deviceId: regDeviceId } = req.body;
+    if (regDeviceId?.trim()) {
+      const bannedDeviceOwner = await User.findOne({ isActive: false, 'knownDevices.deviceId': regDeviceId.trim() });
+      if (bannedDeviceOwner) {
+        return res.status(403).json({
+          success: false,
+          isDeviceBanned: true,
+          message: 'This device cannot be used to create a new account on FixNG.',
+        });
+      }
+    }
+
     // Check if phone is already registered
     const existing = await User.findOne({ phone: result.normalized });
     if (existing) {
+      if (!existing.isActive) {
+        return res.status(403).json({
+          success: false,
+          isAccountDisabled: true,
+          message: 'This phone number is associated with a disabled account. You are no longer allowed to use FixNG.',
+        });
+      }
       return res.status(400).json({
         success: false,
         message: 'This phone number is already registered. Please log in instead.',
@@ -199,7 +235,11 @@ exports.verifyLoginOTP = async (req, res) => {
     }
 
     if (!user.isActive) {
-      return res.status(403).json({ success: false, message: 'Your account has been deactivated.' });
+      return res.status(403).json({
+        success: false,
+        isAccountDisabled: true,
+        message: 'Your account has been disabled. You are no longer allowed to use FixNG.',
+      });
     }
 
     // Register this device as trusted so future logins skip OTP.
@@ -393,7 +433,7 @@ exports.getMe = async (req, res) => {
 
     if (user.role === 'artisan') {
       artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-        'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel'
+        'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel isPro proSource'
       );
     }
 

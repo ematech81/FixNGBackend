@@ -117,7 +117,7 @@ const ArtisanProfileSchema = new mongoose.Schema(
     isPro: { type: Boolean, default: false },
     proSource: {
       type: String,
-      enum: ['subscription', 'admin'],
+      enum: [null, 'subscription', 'admin'],
       default: null,
     },
     proGrantedBy: {
@@ -168,20 +168,19 @@ ArtisanProfileSchema.pre('save', function (next) {
   const sk = this.skippedSteps || {};
 
   // A step counts as "done" when either uploaded OR deliberately skipped
+  // Video (step 5) is optional — skipping it does not block completion
   const step4Done = s.verificationId || sk.verificationId;
   const step5Done = s.skillVideo || sk.skillVideo;
   const allDone = s.profilePhoto && s.skills && s.location && step4Done && step5Done;
-
-  // All five steps actually uploaded (no skips) — eligible for admin review
-  const allUploaded = s.profilePhoto && s.skills && s.location && s.verificationId && s.skillVideo;
-  const noneSkipped = !sk.verificationId && !sk.skillVideo;
 
   if (allDone && !this.onboardingComplete) {
     this.onboardingComplete = true;
   }
 
-  // Only move to 'pending' (admin review queue) when every upload is complete and nothing was skipped
-  if (allUploaded && noneSkipped && this.verificationStatus === 'incomplete') {
+  // Move to 'pending' (admin review queue) when ID is uploaded (not skipped).
+  // Video upload is optional and does not affect eligibility for review.
+  const idUploaded = s.profilePhoto && s.skills && s.location && s.verificationId && !sk.verificationId;
+  if (idUploaded && this.verificationStatus === 'incomplete') {
     this.verificationStatus = 'pending';
   }
 

@@ -214,7 +214,7 @@ exports.suspendArtisan = async (req, res) => {
     if (!reason?.trim()) {
       return res.status(400).json({ success: false, message: 'Suspension reason is required.' });
     }
-
+ 
     const profile = await ArtisanProfile.findOneAndUpdate(
       { userId: req.params.artisanUserId },
       { isSuspended: true, suspensionReason: reason.trim() },
@@ -566,6 +566,69 @@ exports.revokePro = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to revoke Pro status.' });
+  }
+};
+
+// ─── Customer moderation ──────────────────────────────────────────────────────
+
+exports.warnCustomer = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) return res.status(400).json({ success: false, message: 'Warning reason is required.' });
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { $inc: { warningCount: 1 } },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    notify(req.params.userId, 'account_warning',
+      `Account Warning #${user.warningCount}`,
+      reason.trim(), {}
+    );
+    res.status(200).json({ success: true, message: 'Warning issued.', data: { warningCount: user.warningCount } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to warn customer.' });
+  }
+};
+
+exports.suspendCustomer = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) return res.status(400).json({ success: false, message: 'Suspension reason is required.' });
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { isSuspended: true, suspensionReason: reason.trim() },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    notify(req.params.userId, 'account_suspended',
+      'Account Suspended',
+      reason.trim(), {}
+    );
+    res.status(200).json({ success: true, message: 'Customer suspended.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to suspend customer.' });
+  }
+};
+
+exports.unsuspendCustomer = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { isSuspended: false, suspensionReason: null },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    notify(req.params.userId, 'account_unsuspended',
+      'Account Reinstated',
+      'Your account has been reinstated. You can now use FixNG again.', {}
+    );
+    res.status(200).json({ success: true, message: 'Customer unsuspended.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to unsuspend customer.' });
   }
 };
 

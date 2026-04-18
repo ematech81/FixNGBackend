@@ -65,6 +65,11 @@ const UserSchema = new mongoose.Schema(
       ],
       default: [],
     },
+
+    // ── Customer moderation fields ────────────────────────────────────────────
+    warningCount:     { type: Number, default: 0 },
+    isSuspended:      { type: Boolean, default: false },
+    suspensionReason: { type: String, default: null },
   },
   { timestamps: true }
 );

@@ -47,6 +47,12 @@ exports.getOnboardingStatus = async (req, res) => {
         skillVideo: {
           uploaded: !!profile.skillVideo?.url,
         },
+        isSuspended: profile.isSuspended || false,
+        suspensionReason: profile.suspensionReason || null,
+        isBanned: profile.isBanned || false,
+        banReason: profile.banReason || null,
+        isPro: profile.isPro || false,
+        proSource: profile.proSource || null,
       },
     });
   } catch (err) {

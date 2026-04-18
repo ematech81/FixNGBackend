@@ -74,10 +74,9 @@ exports.getNotifications = async (req, res) => {
 // ─── GET /api/notifications/unread-count ─────────────────────────────────────
 exports.getUnreadCount = async (req, res) => {
   try {
-    const count = await Notification.countDocuments({
-      userId: req.user._id,
-      read: false,
-    });
+    const filter = { userId: req.user._id, read: false };
+    if (req.query.type) filter.type = req.query.type;
+    const count = await Notification.countDocuments(filter);
     res.status(200).json({ success: true, count });
   } catch (err) {
     console.error(err);

@@ -15,6 +15,9 @@ const {
   banArtisan,
   grantPro,
   revokePro,
+  warnCustomer,
+  suspendCustomer,
+  unsuspendCustomer,
   getJobs,
   getComplaints,
   resolveComplaint,
@@ -44,6 +47,11 @@ router.post('/artisans/:artisanUserId/unsuspend', unsuspendArtisan);
 router.post('/artisans/:artisanUserId/ban', banArtisan);
 router.post('/artisans/:artisanUserId/grant-pro', grantPro);
 router.post('/artisans/:artisanUserId/revoke-pro', revokePro);
+
+// Customers
+router.post('/customers/:userId/warn', warnCustomer);
+router.post('/customers/:userId/suspend', suspendCustomer);
+router.post('/customers/:userId/unsuspend', unsuspendCustomer);
 
 // Jobs
 router.get('/jobs', getJobs);
