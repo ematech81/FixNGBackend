@@ -74,6 +74,8 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+UserSchema.index({ isActive: 1 });
+
 // Hash password before saving (skip if phone-only user has no password)
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password') || !this.password) return next();

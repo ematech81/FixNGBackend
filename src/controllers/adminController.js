@@ -502,6 +502,17 @@ exports.toggleUserActive = async (req, res) => {
     user.isActive = !user.isActive;
     await user.save();
 
+    // Cancel any open jobs belonging to this user when deactivating
+    if (!user.isActive) {
+      await Job.updateMany(
+        {
+          $or: [{ customerId: user._id }, { assignedArtisanId: user._id }],
+          status: { $in: ['pending', 'accepted', 'in-progress'] },
+        },
+        { $set: { status: 'cancelled' } }
+      );
+    }
+
     const action = user.isActive ? 'enabled' : 'disabled';
     res.status(200).json({
       success: true,

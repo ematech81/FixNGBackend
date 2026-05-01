@@ -1,6 +1,16 @@
 const express = require('express');
 const { body } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+});
+
 const {
   register,
   login,
@@ -19,13 +29,13 @@ const { protect } = require('../middleware/auth');
 router.post('/check-device', checkDevice);
 
 // Step 1: send OTP (for both register and login)
-router.post('/otp/send', sendOTPHandler);
+router.post('/otp/send', otpLimiter, sendOTPHandler);
 
 // Step 2a: verify OTP + create new account
-router.post('/otp/verify-register', verifyRegister);
+router.post('/otp/verify-register', otpLimiter, verifyRegister);
 
 // Step 2b: verify OTP + log in existing account
-router.post('/otp/verify-login', verifyLoginOTP);
+router.post('/otp/verify-login', otpLimiter, verifyLoginOTP);
 
 // ── Email / password flow (legacy / admin) ─────────────────────────────────────
 router.post(

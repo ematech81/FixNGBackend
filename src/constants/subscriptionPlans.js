@@ -1,63 +1,72 @@
 /**
- * Canonical subscription plan definitions.
- * Prices are in Naira (₦). paystackAmount is in kobo (× 100).
+ * Subscription plan definitions.
+ * paystackPlanCode: create plans on Paystack Dashboard → Subscriptions → Plans,
+ * then set PAYSTACK_BASIC_PLAN_CODE and PAYSTACK_PREMIUM_PLAN_CODE in .env
  */
 const PLANS = {
   free: {
-    id:          'free',
-    name:        'Free',
-    price:       0,
-    currency:    '₦',
-    interval:    null,
-    description: 'Get started on FixNG at no cost.',
+    id:               'free',
+    name:             'Free',
+    price:            0,
+    currency:         '₦',
+    interval:         null,
+    paystackPlanCode: null,
+    description:      'Get started on FixNG at no cost.',
     features: [
-      'Basic marketplace access',
-      'Post up to 3 jobs per month',
+      'Up to 2 active jobs at a time',
       '5 direct artisan requests per month',
-      'Standard search placement',
-      'In-app chat with artisans',
+      'Basic search placement',
+      'In-app chat with customers',
+      'Standard support',
     ],
-    limits: { directRequests: 5, jobPosts: 3 },
+    limits: { activeJobs: 2, directRequests: 5 },
   },
-  pro: {
-    id:              'pro',
-    name:            'Artisan Pro',
-    price:           3500,
-    paystackAmount:  350000,   // kobo
-    currency:        '₦',
-    interval:        'monthly',
-    description:     'Grow your artisan business faster.',
-    badge:           'Pro',
-    badgeColor:      '#2563EB',
+
+  basic: {
+    id:               'basic',
+    name:             'Basic',
+    price:            3000,
+    paystackAmount:   300000,   // kobo
+    paystackPlanCode: process.env.PAYSTACK_BASIC_PLAN_CODE || '',
+    currency:         '₦',
+    interval:         'monthly',
+    description:      'Grow your artisan business faster.',
+    badge:            'Pro',
+    badgeColor:       '#2563EB',
     features: [
+      'Up to 10 active jobs simultaneously',
       'Unlimited direct job requests',
       'Priority placement in search results',
-      '"Pro Artisan" badge on your profile',
-      'Acceptance rate shown to customers',
+      '"Verified Pro" badge on your profile',
+      'Acceptance rate visible to customers',
       'Monthly earnings summary',
-      'Post unlimited jobs',
+      'Standard support',
     ],
-    limits: { directRequests: -1, jobPosts: -1 },
+    limits: { activeJobs: 10, directRequests: -1 },
   },
-  elite: {
-    id:              'elite',
-    name:            'Artisan Elite',
-    price:           7500,
-    paystackAmount:  750000,   // kobo
-    currency:        '₦',
-    interval:        'monthly',
-    description:     'Maximum visibility. Maximum earnings.',
-    badge:           'Elite',
-    badgeColor:      '#F59E0B',
+
+  premium: {
+    id:               'premium',
+    name:             'Premium',
+    price:            5000,
+    paystackAmount:   500000,   // kobo
+    paystackPlanCode: process.env.PAYSTACK_PREMIUM_PLAN_CODE || '',
+    currency:         '₦',
+    interval:         'monthly',
+    description:      'Maximum visibility. Maximum earnings.',
+    badge:            'Premium',
+    badgeColor:       '#F59E0B',
     features: [
-      'Everything in Artisan Pro',
-      'Featured on the Home Screen',
-      '"Elite Artisan" badge on your profile',
-      'Advanced analytics & insights dashboard',
+      'Unlimited active jobs simultaneously',
+      'Everything in Basic',
+      'Featured on customer home screen',
+      '"Premium" badge on your profile',
       'Guaranteed top-3 search placement',
+      'Advanced analytics & insights',
+      'Featured in category spotlights',
       'Priority customer support',
     ],
-    limits: { directRequests: -1, jobPosts: -1 },
+    limits: { activeJobs: -1, directRequests: -1 },
   },
 };
 

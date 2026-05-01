@@ -1,14 +1,14 @@
 const Subscription = require('../models/Subscription');
 
 const TIER_LIMITS = {
-  free:  { maxActiveJobs: 2 },
-  pro:   { maxActiveJobs: 10 },
-  elite: { maxActiveJobs: Infinity },
+  free:    { maxActiveJobs: 2 },
+  basic:   { maxActiveJobs: 10 },
+  premium: { maxActiveJobs: Infinity },
 };
 
 /**
- * Returns the artisan's effective subscription plan ('free' | 'pro' | 'elite').
- * Treats expired or cancelled paid plans as 'free'.
+ * Returns the artisan's effective plan ('free' | 'basic' | 'premium').
+ * Expired or cancelled paid plans fall back to 'free'.
  */
 async function getArtisanPlan(userId) {
   const sub = await Subscription.findOne({ userId }).lean();

@@ -152,6 +152,10 @@ const ArtisanProfileSchema = new mongoose.Schema(
 
 // 2dsphere index for geo-based artisan discovery
 ArtisanProfileSchema.index({ location: '2dsphere' });
+// Indexes for admin filters and suspension checks
+ArtisanProfileSchema.index({ verificationStatus: 1 });
+ArtisanProfileSchema.index({ isSuspended: 1 });
+ArtisanProfileSchema.index({ isBanned: 1 });
 
 // Virtual: check if all 5 steps are done (upload or skip counts)
 ArtisanProfileSchema.virtual('allStepsDone').get(function () {

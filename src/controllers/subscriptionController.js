@@ -1,13 +1,15 @@
-const crypto          = require('crypto');
-const Subscription    = require('../models/Subscription');
-const ArtisanProfile  = require('../models/ArtisanProfile');
-const User            = require('../models/User');
-const PLANS           = require('../constants/subscriptionPlans');
-const { initializeTransaction, verifyTransaction } = require('../services/paystackService');
-const { notify }      = require('./notificationController');
+const crypto         = require('crypto');
+const Subscription   = require('../models/Subscription');
+const ArtisanProfile = require('../models/ArtisanProfile');
+const User           = require('../models/User');
+const PLANS          = require('../constants/subscriptionPlans');
+const {
+  initializeTransaction,
+  verifyTransaction,
+} = require('../services/paystackService');
+const { notify } = require('./notificationController');
 
-// ─── Helper: sync isPro on ArtisanProfile based on subscription state ──────────
-// source: 'subscription' | null (revoke)
+// ─── Helper: keep ArtisanProfile.isPro in sync ───────────────────────────────
 const syncProStatus = async (userId, active, source = 'subscription') => {
   try {
     if (active) {
@@ -17,7 +19,6 @@ const syncProStatus = async (userId, active, source = 'subscription') => {
         { new: true }
       );
     } else {
-      // Only revoke if the current source is 'subscription' — admin grants persist
       await ArtisanProfile.findOneAndUpdate(
         { userId, proSource: 'subscription' },
         { isPro: false, proSource: null, proGrantedAt: null, proGrantedBy: null }
@@ -28,29 +29,59 @@ const syncProStatus = async (userId, active, source = 'subscription') => {
   }
 };
 
-// ─── GET /api/subscriptions/plans — Public plan list ──────────────────────────
-exports.getPlans = async (req, res) => {
+// ─── Helper: activate subscription record ────────────────────────────────────
+const activateSubscription = async (userId, plan, reference, subscriptionCode, customerCode) => {
+  const now      = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  await Subscription.findOneAndUpdate(
+    { userId },
+    {
+      plan:                      plan.id,
+      status:                    'active',
+      startDate:                 now,
+      expiresAt,
+      paystackReference:         reference,
+      paystackSubscriptionCode:  subscriptionCode || null,
+      paystackCustomerCode:      customerCode     || null,
+      autoRenew:                 true,
+      $push: {
+        history: {
+          plan:      plan.id,
+          amount:    plan.price,
+          currency:  '₦',
+          reference,
+          paidAt:    now,
+        },
+      },
+    },
+    { upsert: true, new: true }
+  );
+
+  await syncProStatus(userId, true, 'subscription');
+};
+
+// ─── GET /api/subscriptions/plans ────────────────────────────────────────────
+exports.getPlans = (req, res) => {
   res.status(200).json({ success: true, data: Object.values(PLANS) });
 };
 
-// ─── GET /api/subscriptions/me — Current user's subscription ──────────────────
+// ─── GET /api/subscriptions/me ───────────────────────────────────────────────
 exports.getMySubscription = async (req, res) => {
   try {
     let sub = await Subscription.findOne({ userId: req.user._id }).lean();
 
-    // Auto-create a free record if none exists
     if (!sub) {
       sub = await Subscription.create({ userId: req.user._id, plan: 'free' });
       sub = sub.toObject();
     }
 
-    // Mark expired paid plans
+    // Auto-expire lapsed paid plans
     if (sub.plan !== 'free' && sub.expiresAt && new Date(sub.expiresAt) < new Date()) {
       await Subscription.findOneAndUpdate(
         { userId: req.user._id },
         { status: 'expired', plan: 'free' }
       );
-      // Revoke subscription-based Pro status
       await syncProStatus(req.user._id, false);
       sub.status = 'expired';
       sub.plan   = 'free';
@@ -59,12 +90,12 @@ exports.getMySubscription = async (req, res) => {
     const planDetails = PLANS[sub.plan] || PLANS.free;
     res.status(200).json({ success: true, data: { ...sub, planDetails } });
   } catch (err) {
-    console.error(err);
+    console.error('getMySubscription error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch subscription.' });
   }
 };
 
-// ─── POST /api/subscriptions/initiate — Start a Paystack checkout ────────────
+// ─── POST /api/subscriptions/initiate ────────────────────────────────────────
 exports.initiateSubscription = async (req, res) => {
   try {
     const { planId } = req.body;
@@ -74,12 +105,26 @@ exports.initiateSubscription = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid plan selected.' });
     }
 
-    const user = await User.findById(req.user._id).select('email name phone').lean();
-    const email = user.email || `${user.phone}@fixng.app`; // Paystack requires an email
+    if (!plan.paystackPlanCode) {
+      return res.status(503).json({
+        success: false,
+        message: 'This plan is not yet configured. Please contact support.',
+      });
+    }
+
+    // Check if already on this plan
+    const existing = await Subscription.findOne({ userId: req.user._id }).lean();
+    if (existing?.plan === planId && existing?.status === 'active') {
+      return res.status(400).json({ success: false, message: `You are already on the ${plan.name} plan.` });
+    }
+
+    const user  = await User.findById(req.user._id).select('email name phone').lean();
+    const email = user.email || `${user.phone.replace(/\+/g, '')}@fixng.app`;
 
     const txData = await initializeTransaction({
       email,
       amountKobo: plan.paystackAmount,
+      planCode:   plan.paystackPlanCode,
       metadata: {
         userId:   req.user._id.toString(),
         planId:   plan.id,
@@ -91,6 +136,7 @@ exports.initiateSubscription = async (req, res) => {
       success: true,
       data: {
         authorizationUrl: txData.authorization_url,
+        accessCode:       txData.access_code,
         reference:        txData.reference,
         plan,
       },
@@ -101,7 +147,7 @@ exports.initiateSubscription = async (req, res) => {
   }
 };
 
-// ─── POST /api/subscriptions/verify — Verify payment after redirect ───────────
+// ─── POST /api/subscriptions/verify ──────────────────────────────────────────
 exports.verifySubscription = async (req, res) => {
   try {
     const { reference } = req.body;
@@ -122,120 +168,145 @@ exports.verifySubscription = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid payment metadata.' });
     }
 
-    // Activate subscription — 30-day rolling window
-    const now       = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // Paystack includes subscription details when a plan code was used
+    const subscriptionCode = tx.subscription?.subscription_code || null;
+    const customerCode     = tx.customer?.customer_code         || null;
 
-    const sub = await Subscription.findOneAndUpdate(
-      { userId: req.user._id },
-      {
-        plan: plan.id,
-        status:              'active',
-        startDate:           now,
-        expiresAt,
-        paystackReference:   reference,
-        autoRenew:           true,
-        $push: {
-          history: {
-            plan:      plan.id,
-            amount:    plan.price,
-            reference,
-            paidAt:    now,
-          },
-        },
-      },
-      { upsert: true, new: true }
-    );
+    await activateSubscription(req.user._id, plan, reference, subscriptionCode, customerCode);
 
-    // Activate Pro status on the artisan's profile (pro and elite plans grant Pro)
-    if (['pro', 'elite'].includes(plan.id)) {
-      await syncProStatus(req.user._id, true, 'subscription');
-    }
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-    // Notify the user
-    notify(req.user._id, 'profile_verified',  // reuse closest type
-      'Subscription Activated! 🎉',
-      `Welcome to ${plan.name}. Your subscription is active until ${expiresAt.toLocaleDateString('en-NG')}.`,
+    notify(
+      req.user._id,
+      'profile_verified',
+      `${plan.name} Plan Activated! 🎉`,
+      `Your ${plan.name} subscription is active until ${expiresAt.toLocaleDateString('en-NG')}.`,
       {}
     );
 
     res.status(200).json({
       success: true,
-      message: `${plan.name} subscription activated.`,
-      data: sub,
+      message: `${plan.name} subscription activated successfully.`,
+      data: { plan, expiresAt },
     });
   } catch (err) {
     console.error('verifySubscription error:', err.message);
-    res.status(500).json({ success: false, message: 'Verification failed. Contact support.' });
+    res.status(500).json({ success: false, message: 'Verification failed. Contact support if funds were deducted.' });
   }
 };
 
-// ─── POST /api/subscriptions/cancel — Cancel auto-renew ──────────────────────
+// ─── POST /api/subscriptions/cancel ──────────────────────────────────────────
 exports.cancelSubscription = async (req, res) => {
   try {
+    const sub = await Subscription.findOne({ userId: req.user._id });
+
+    if (!sub || sub.plan === 'free') {
+      return res.status(400).json({ success: false, message: 'No active paid subscription found.' });
+    }
+
     await Subscription.findOneAndUpdate(
       { userId: req.user._id },
       { autoRenew: false, status: 'cancelled' }
     );
+
     res.status(200).json({
       success: true,
-      message: 'Subscription cancelled. Access continues until the current period ends.',
+      message: 'Subscription cancelled. Access continues until the end of the current billing period.',
     });
   } catch (err) {
-    console.error(err);
+    console.error('cancelSubscription error:', err);
     res.status(500).json({ success: false, message: 'Failed to cancel subscription.' });
   }
 };
 
-// ─── POST /api/subscriptions/webhook — Paystack event webhook ─────────────────
-// Set this URL in your Paystack dashboard → Settings → Webhooks
+// ─── POST /api/subscriptions/webhook ─────────────────────────────────────────
+// Register this URL in Paystack Dashboard → Settings → Webhooks
 exports.paystackWebhook = async (req, res) => {
-  // Verify the webhook signature
+  // Verify Paystack signature against raw body buffer
   const hash = crypto
     .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-    .update(JSON.stringify(req.body))
+    .update(req.body)
     .digest('hex');
 
   if (hash !== req.headers['x-paystack-signature']) {
     return res.status(401).json({ message: 'Invalid signature.' });
   }
 
-  const { event, data } = req.body;
+  const { event, data } = JSON.parse(req.body);
 
+  // ── First payment or manual charge ────────────────────────────────────────
   if (event === 'charge.success') {
-    const { metadata, reference } = data;
+    const { metadata, reference, subscription: sub, customer } = data;
     const { userId, planId } = metadata || {};
     const plan = PLANS[planId];
     if (!plan || !userId) return res.sendStatus(200);
 
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await Subscription.findOneAndUpdate(
-      { userId },
-      {
-        plan:              plan.id,
-        status:            'active',
-        startDate:         new Date(),
-        expiresAt,
-        paystackReference: reference,
-        autoRenew:         true,
-        $push: {
-          history: { plan: plan.id, amount: plan.price, reference, paidAt: new Date() },
-        },
-      },
-      { upsert: true }
+    await activateSubscription(
+      userId,
+      plan,
+      reference,
+      sub?.subscription_code || null,
+      customer?.customer_code || null
     );
 
     notify(userId, 'profile_verified',
-      'Payment Confirmed 🎉',
-      `Your ${plan.name} subscription has been renewed.`,
+      `${plan.name} Plan Activated! 🎉`,
+      `Your ${plan.name} subscription is now active.`,
       {}
     );
   }
 
+  // ── Recurring renewal ─────────────────────────────────────────────────────
+  if (event === 'invoice.payment_succeeded') {
+    const paystackSub = data.subscription;
+    const planCode    = paystackSub?.plan?.plan_code;
+
+    const plan = Object.values(PLANS).find(p => p.paystackPlanCode === planCode);
+    if (!plan) return res.sendStatus(200);
+
+    const sub = await Subscription.findOne({
+      paystackSubscriptionCode: paystackSub.subscription_code,
+    });
+    if (!sub) return res.sendStatus(200);
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await Subscription.findOneAndUpdate(
+      { _id: sub._id },
+      {
+        plan:      plan.id,
+        status:    'active',
+        expiresAt,
+        autoRenew: true,
+        $push: {
+          history: {
+            plan:      plan.id,
+            amount:    plan.price,
+            currency:  '₦',
+            reference: data.reference || '',
+            paidAt:    new Date(),
+          },
+        },
+      }
+    );
+
+    await syncProStatus(sub.userId, true, 'subscription');
+
+    notify(sub.userId, 'profile_verified',
+      'Subscription Renewed ✅',
+      `Your ${plan.name} plan has been renewed for another month.`,
+      {}
+    );
+  }
+
+  // ── Subscription disabled / cancelled ─────────────────────────────────────
   if (event === 'subscription.disable') {
-    const userId = data.metadata?.userId;
-    if (userId) {
-      await Subscription.findOneAndUpdate({ userId }, { autoRenew: false, status: 'cancelled' });
+    const subscriptionCode = data.subscription_code;
+    if (subscriptionCode) {
+      const sub = await Subscription.findOneAndUpdate(
+        { paystackSubscriptionCode: subscriptionCode },
+        { autoRenew: false, status: 'cancelled' }
+      );
+      if (sub) await syncProStatus(sub.userId, false);
     }
   }
 

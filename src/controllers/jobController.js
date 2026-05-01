@@ -228,26 +228,27 @@ exports.acceptJob = async (req, res) => {
     const { jobId } = req.params;
     const { estimatedArrivalMinutes, agreedPrice } = req.body;
 
-    const job = await Job.findById(jobId);
+    // Pre-checks: load job for validation before the atomic write
+    const existing = await Job.findById(jobId);
 
-    if (!job) {
+    if (!existing) {
       return res.status(404).json({ success: false, message: 'Job not found.' });
     }
 
-    if (job.status !== 'pending') {
-      return res.status(400).json({
+    if (existing.status !== 'pending') {
+      return res.status(409).json({
         success: false,
-        message: job.status === 'accepted'
-          ? 'This job has already been accepted by another artisan.'
-          : `Job is ${job.status} and cannot be accepted.`,
+        message: existing.status === 'accepted'
+          ? 'Job already accepted.'
+          : `Job is ${existing.status} and cannot be accepted.`,
       });
     }
 
-    if (job.expiresAt && job.expiresAt < new Date()) {
+    if (existing.expiresAt && existing.expiresAt < new Date()) {
       return res.status(400).json({ success: false, message: 'This job has expired.' });
     }
 
-    if (job.declinedBy.includes(req.user._id)) {
+    if (existing.declinedBy.includes(req.user._id)) {
       return res.status(400).json({ success: false, message: 'You previously declined this job.' });
     }
 
@@ -274,14 +275,25 @@ exports.acceptJob = async (req, res) => {
       }
     }
 
-    // Accept
-    job.status = 'accepted';
-    job.assignedArtisanId = req.user._id;
-    job.estimatedArrivalMinutes = estimatedArrivalMinutes || null;
-    job.agreedPrice = agreedPrice || null;
-    job.timeline.acceptedAt = new Date();
+    // Atomic accept: only succeeds if status is still 'pending' at write time.
+    // If two artisans pass the checks above simultaneously, exactly one wins here.
+    const job = await Job.findOneAndUpdate(
+      { _id: jobId, status: 'pending' },
+      {
+        $set: {
+          status: 'accepted',
+          assignedArtisanId: req.user._id,
+          estimatedArrivalMinutes: estimatedArrivalMinutes || null,
+          agreedPrice: agreedPrice || null,
+          'timeline.acceptedAt': new Date(),
+        },
+      },
+      { new: true }
+    );
 
-    await job.save();
+    if (!job) {
+      return res.status(409).json({ success: false, message: 'Job already accepted.' });
+    }
 
     // Notify customer
     const artisan = await User.findById(req.user._id).select('name');

@@ -1,4 +1,5 @@
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 
 let io;
 
@@ -12,8 +13,20 @@ const initSocket = (httpServer) => {
     pingInterval: 25000,
   });
 
+  io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) return next(new Error('Unauthorized'));
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      socket.userId = decoded.id;
+      next();
+    } catch {
+      next(new Error('Unauthorized'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    const userId = socket.handshake.query.userId;
+    const userId = socket.userId;
 
     if (userId) {
       // Each user joins a private room named after their userId
