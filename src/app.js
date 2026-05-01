@@ -13,8 +13,10 @@ connectDB();
 // Init Socket.io on the same HTTP server
 initSocket(server);
 
-// Middleware
+// Middleware — x-app-key guard (exempt webhook + health check)
+const EXEMPT_PATHS = ['/api/subscriptions/webhook', '/api/health'];
 app.use((req, res, next) => {
+  if (EXEMPT_PATHS.includes(req.path)) return next();
   const key = req.headers['x-app-key'];
   if (!key || key !== process.env.APP_KEY) {
     return res.status(403).json({ success: false, message: 'Forbidden' });

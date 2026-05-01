@@ -157,15 +157,24 @@ exports.verifySubscription = async (req, res) => {
 
     const tx = await verifyTransaction(reference);
 
+    console.log('[verify] tx.status:', tx.status);
+    console.log('[verify] tx.metadata:', JSON.stringify(tx.metadata));
+    console.log('[verify] req.user._id:', req.user._id.toString());
+
     if (tx.status !== 'success') {
-      return res.status(400).json({ success: false, message: 'Payment was not successful.' });
+      return res.status(400).json({ success: false, message: `Payment was not successful (status: ${tx.status}).` });
     }
 
     const { planId, userId } = tx.metadata || {};
     const plan = PLANS[planId];
 
-    if (!plan || userId !== req.user._id.toString()) {
-      return res.status(400).json({ success: false, message: 'Invalid payment metadata.' });
+    if (!plan) {
+      console.error('[verify] Unknown planId in metadata:', planId);
+      return res.status(400).json({ success: false, message: 'Invalid payment metadata: unknown plan.' });
+    }
+    if (userId !== req.user._id.toString()) {
+      console.error('[verify] userId mismatch. metadata:', userId, 'req:', req.user._id.toString());
+      return res.status(400).json({ success: false, message: 'Invalid payment metadata: user mismatch.' });
     }
 
     // Paystack includes subscription details when a plan code was used
