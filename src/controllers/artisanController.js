@@ -310,6 +310,80 @@ exports.uploadSkillVideo = async (req, res) => {
   }
 };
 
+// ─── POST /api/artisan/onboarding/profile-photo-url ──────────────────────────
+// Called after the frontend uploads directly to Cloudinary.
+// Receives the resulting URL + publicId and saves them to the profile.
+exports.saveProfilePhotoUrl = async (req, res) => {
+  try {
+    const { url, publicId } = req.body;
+    if (!url || !publicId) {
+      return res.status(400).json({ success: false, message: 'url and publicId are required.' });
+    }
+
+    const profile = await ArtisanProfile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    // Delete old photo from Cloudinary if replacing
+    if (profile.profilePhoto?.publicId) {
+      await deleteCloudinaryAsset(profile.profilePhoto.publicId, 'image');
+    }
+
+    profile.profilePhoto = { url, publicId };
+    profile.completedSteps.profilePhoto = true;
+    await profile.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile photo saved.',
+      data: { profilePhotoUrl: url, completedSteps: profile.completedSteps },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to save photo. Please try again.' });
+  }
+};
+
+// ─── POST /api/artisan/onboarding/skill-video-url ─────────────────────────────
+// Called after the frontend uploads directly to Cloudinary.
+exports.saveSkillVideoUrl = async (req, res) => {
+  try {
+    const { url, publicId } = req.body;
+    if (!url || !publicId) {
+      return res.status(400).json({ success: false, message: 'url and publicId are required.' });
+    }
+
+    const profile = await ArtisanProfile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    if (profile.skillVideo?.publicId) {
+      await deleteCloudinaryAsset(profile.skillVideo.publicId, 'video');
+    }
+
+    profile.skillVideo = { url, publicId, uploadedAt: new Date() };
+    profile.completedSteps.skillVideo = true;
+    profile.skippedSteps.skillVideo = false;
+    await profile.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Skill video saved.',
+      data: {
+        skillVideoUploaded: true,
+        completedSteps: profile.completedSteps,
+        onboardingComplete: profile.onboardingComplete,
+        verificationStatus: profile.verificationStatus,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to save video. Please try again.' });
+  }
+};
+
 // ─── POST /api/artisan/onboarding/skip-verification-id ───────────────────────
 // User chose to skip ID upload. Marks step as done (so routing advances) but
 // sets skippedSteps.verificationId = true so they stay ineligible for verification.

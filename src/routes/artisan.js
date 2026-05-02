@@ -10,10 +10,12 @@ const {
 const {
   getOnboardingStatus,
   uploadProfilePhoto,
+  saveProfilePhotoUrl,
   updateSkills,
   updateLocation,
   uploadVerificationId,
   uploadSkillVideo,
+  saveSkillVideoUrl,
   skipVerificationId,
   skipSkillVideo,
   getSkillsList,
@@ -51,6 +53,10 @@ router.post(
   handleUploadError,
   uploadSkillVideo
 );
+
+// Direct Cloudinary upload — frontend uploads to Cloudinary, sends URL here to save
+router.post('/onboarding/profile-photo-url', saveProfilePhotoUrl);
+router.post('/onboarding/skill-video-url',   saveSkillVideoUrl);
 
 // Skip optional steps
 router.post('/onboarding/skip-verification-id', skipVerificationId);

@@ -112,6 +112,16 @@ exports.initiateSubscription = async (req, res) => {
       });
     }
 
+    // Only verified artisans can subscribe
+    const artisanProfile = await ArtisanProfile.findOne({ userId: req.user._id })
+      .select('verificationStatus').lean();
+    if (!artisanProfile || artisanProfile.verificationStatus !== 'verified') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your artisan account must be verified before subscribing. Please wait for admin approval.',
+      });
+    }
+
     // Check if already on this plan
     const existing = await Subscription.findOne({ userId: req.user._id }).lean();
     if (existing?.plan === planId && existing?.status === 'active') {
