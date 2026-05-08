@@ -1,17 +1,11 @@
-/**
- * Subscription plan definitions.
- * paystackPlanCode: create plans on Paystack Dashboard → Subscriptions → Plans,
- * then set PAYSTACK_BASIC_PLAN_CODE and PAYSTACK_PREMIUM_PLAN_CODE in .env
- */
 const PLANS = {
   free: {
-    id:               'free',
-    name:             'Free',
-    price:            0,
-    currency:         '₦',
-    interval:         null,
-    paystackPlanCode: null,
-    description:      'Get started on FixNG at no cost.',
+    id:          'free',
+    name:        'Free',
+    price:       0,
+    currency:    '₦',
+    interval:    null,
+    description: 'Get started on FixNG at no cost.',
     features: [
       'Up to 2 active jobs at a time',
       '5 direct artisan requests per month',
@@ -23,16 +17,14 @@ const PLANS = {
   },
 
   basic: {
-    id:               'basic',
-    name:             'Basic',
-    price:            3000,
-    paystackAmount:   300000,   // kobo
-    paystackPlanCode: process.env.PAYSTACK_BASIC_PLAN_CODE || '',
-    currency:         '₦',
-    interval:         'monthly',
-    description:      'Grow your artisan business faster.',
-    badge:            'Pro',
-    badgeColor:       '#2563EB',
+    id:          'basic',
+    name:        'Basic',
+    price:       3000,   // Naira — passed directly to Flutterwave
+    currency:    '₦',
+    interval:    'monthly',
+    description: 'Grow your artisan business faster.',
+    badge:       'Pro',
+    badgeColor:  '#2563EB',
     features: [
       'Up to 10 active jobs simultaneously',
       'Unlimited direct job requests',
@@ -46,16 +38,14 @@ const PLANS = {
   },
 
   premium: {
-    id:               'premium',
-    name:             'Premium',
-    price:            5000,
-    paystackAmount:   500000,   // kobo
-    paystackPlanCode: process.env.PAYSTACK_PREMIUM_PLAN_CODE || '',
-    currency:         '₦',
-    interval:         'monthly',
-    description:      'Maximum visibility. Maximum earnings.',
-    badge:            'Premium',
-    badgeColor:       '#F59E0B',
+    id:          'premium',
+    name:        'Premium',
+    price:       5000,   // Naira — passed directly to Flutterwave
+    currency:    '₦',
+    interval:    'monthly',
+    description: 'Maximum visibility. Maximum earnings.',
+    badge:       'Premium',
+    badgeColor:  '#F59E0B',
     features: [
       'Unlimited active jobs simultaneously',
       'Everything in Basic',

@@ -425,6 +425,44 @@ exports.cancelArtisanRegistration = async (req, res) => {
   }
 };
 
+// ─── PUT /api/auth/profile ────────────────────────────────────────────────────
+exports.updateUserProfile = async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    const updates = {};
+    if (name?.trim()) updates.name = name.trim();
+    if (email !== undefined) {
+      updates.email = email?.trim()?.toLowerCase() || null;
+    }
+
+    if (updates.email) {
+      const existing = await User.findOne({ email: updates.email, _id: { $ne: req.user._id } });
+      if (existing) {
+        return res.status(400).json({ success: false, message: 'This email is already in use by another account.' });
+      }
+    }
+
+    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully.',
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        authMethod: user.authMethod,
+      },
+    });
+  } catch (err) {
+    console.error('updateUserProfile error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update profile.' });
+  }
+};
+
 // ─── GET /api/auth/me ─────────────────────────────────────────────────────────
 exports.getMe = async (req, res) => {
   try {

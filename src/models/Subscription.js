@@ -20,13 +20,11 @@ const subscriptionSchema = new mongoose.Schema(
       enum:    ['active', 'cancelled', 'expired', 'past_due'],
       default: 'active',
     },
-    startDate:  { type: Date, default: Date.now },
-    expiresAt:  { type: Date, default: null },   // null = free plan (no expiry)
+    startDate: { type: Date, default: Date.now },
+    expiresAt: { type: Date, default: null },   // null = free plan (no expiry)
 
-    // Paystack references
-    paystackReference:       { type: String, default: null },
-    paystackSubscriptionCode:{ type: String, default: null },
-    paystackCustomerCode:    { type: String, default: null },
+    // Flutterwave reference (tx_ref)
+    paymentReference: { type: String, default: null },
 
     autoRenew: { type: Boolean, default: true },
 

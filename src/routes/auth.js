@@ -21,6 +21,7 @@ const {
   verifyLoginOTP,
   becomeArtisan,
   cancelArtisanRegistration,
+  updateUserProfile,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
@@ -62,6 +63,7 @@ router.post('/cancel-artisan-registration', protect, cancelArtisanRegistration);
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 router.get('/me', protect, getMe);
+router.put('/profile', protect, updateUserProfile);
 
 // ── Push notification token registration ──────────────────────────────────────
 router.post('/push-token', protect, async (req, res) => {

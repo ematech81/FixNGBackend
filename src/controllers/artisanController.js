@@ -40,6 +40,7 @@ exports.getOnboardingStatus = async (req, res) => {
           lga: profile.location?.lga || null,
           coordinates: profile.location?.coordinates || null,
         },
+        bio: profile.bio || '',
         verificationId: {
           uploaded: !!profile.verificationId?.url,
           idType: profile.verificationId?.idType || null,
@@ -448,4 +449,81 @@ exports.skipSkillVideo = async (req, res) => {
 // ─── GET /api/artisan/skills-list ─────────────────────────────────────────────
 exports.getSkillsList = (req, res) => {
   res.status(200).json({ success: true, data: ARTISAN_SKILLS });
+};
+
+// ─── PUT /api/artisan/profile ─────────────────────────────────────────────────
+exports.updateArtisanProfile = async (req, res) => {
+  try {
+    const { bio, skills, location, profilePhoto } = req.body;
+
+    const profile = await ArtisanProfile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    const update = {};
+
+    if (bio !== undefined) {
+      if (bio.length > 300) {
+        return res.status(400).json({ success: false, message: 'Bio must be 300 characters or less.' });
+      }
+      update.bio = bio.trim();
+    }
+
+    if (skills !== undefined) {
+      if (!Array.isArray(skills) || skills.length === 0) {
+        return res.status(400).json({ success: false, message: 'Select at least one skill.' });
+      }
+      if (skills.length > 5) {
+        return res.status(400).json({ success: false, message: 'You can select a maximum of 5 skills.' });
+      }
+      update.skills = skills;
+      update['completedSteps.skills'] = true;
+    }
+
+    if (location) {
+      const { address, state, lga, latitude, longitude } = location;
+      if (!address?.trim() || !state?.trim()) {
+        return res.status(400).json({ success: false, message: 'Address and state are required.' });
+      }
+
+      // Preserve existing coordinates when new GPS isn't provided
+      let coords = profile.location?.coordinates || [8.6753, 9.082];
+      if (latitude != null && longitude != null) {
+        const lat = parseFloat(latitude);
+        const lng = parseFloat(longitude);
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          coords = [lng, lat];
+        }
+      }
+
+      update.location = {
+        type: 'Point',
+        coordinates: coords,
+        address: address.trim(),
+        state: state.trim(),
+        lga: lga?.trim() || null,
+      };
+      update['completedSteps.location'] = true;
+    }
+
+    if (profilePhoto?.url) {
+      if (profile.profilePhoto?.publicId) {
+        await deleteCloudinaryAsset(profile.profilePhoto.publicId, 'image');
+      }
+      update.profilePhoto = { url: profilePhoto.url, publicId: profilePhoto.publicId || '' };
+      update['completedSteps.profilePhoto'] = true;
+    }
+
+    await ArtisanProfile.findOneAndUpdate(
+      { userId: req.user._id },
+      { $set: update },
+      { new: true }
+    );
+
+    res.status(200).json({ success: true, message: 'Profile updated successfully.' });
+  } catch (err) {
+    console.error('updateArtisanProfile error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update profile.' });
+  }
 };

@@ -1,12 +1,8 @@
-const crypto         = require('crypto');
 const Subscription   = require('../models/Subscription');
 const ArtisanProfile = require('../models/ArtisanProfile');
 const User           = require('../models/User');
 const PLANS          = require('../constants/subscriptionPlans');
-const {
-  initializeTransaction,
-  verifyTransaction,
-} = require('../services/paystackService');
+const { initializePayment, verifyPayment } = require('../services/flutterwaveService');
 const { notify } = require('./notificationController');
 
 // ─── Helper: keep ArtisanProfile.isPro in sync ───────────────────────────────
@@ -30,27 +26,25 @@ const syncProStatus = async (userId, active, source = 'subscription') => {
 };
 
 // ─── Helper: activate subscription record ────────────────────────────────────
-const activateSubscription = async (userId, plan, reference, subscriptionCode, customerCode) => {
+const activateSubscription = async (userId, plan, txRef) => {
   const now      = new Date();
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   await Subscription.findOneAndUpdate(
     { userId },
     {
-      plan:                      plan.id,
-      status:                    'active',
-      startDate:                 now,
+      plan:             plan.id,
+      status:           'active',
+      startDate:        now,
       expiresAt,
-      paystackReference:         reference,
-      paystackSubscriptionCode:  subscriptionCode || null,
-      paystackCustomerCode:      customerCode     || null,
-      autoRenew:                 true,
+      paymentReference: txRef,
+      autoRenew:        true,
       $push: {
         history: {
           plan:      plan.id,
           amount:    plan.price,
           currency:  '₦',
-          reference,
+          reference: txRef,
           paidAt:    now,
         },
       },
@@ -105,13 +99,6 @@ exports.initiateSubscription = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid plan selected.' });
     }
 
-    if (!plan.paystackPlanCode) {
-      return res.status(503).json({
-        success: false,
-        message: 'This plan is not yet configured. Please contact support.',
-      });
-    }
-
     // Only verified artisans can subscribe
     const artisanProfile = await ArtisanProfile.findOne({ userId: req.user._id })
       .select('verificationStatus').lean();
@@ -122,34 +109,27 @@ exports.initiateSubscription = async (req, res) => {
       });
     }
 
-    // Check if already on this plan
+    // Check if already on this plan and active
     const existing = await Subscription.findOne({ userId: req.user._id }).lean();
     if (existing?.plan === planId && existing?.status === 'active') {
       return res.status(400).json({ success: false, message: `You are already on the ${plan.name} plan.` });
     }
 
     const user  = await User.findById(req.user._id).select('email name phone').lean();
-    const email = user.email || `${user.phone.replace(/\+/g, '')}@fixng.app`;
+    const email = user.email || `${String(user.phone).replace(/\+/g, '')}@fixng.app`;
+    const name  = user.name || 'FixNG User';
 
-    const txData = await initializeTransaction({
+    const { payment_link, tx_ref } = await initializePayment({
       email,
-      amountKobo: plan.paystackAmount,
-      planCode:   plan.paystackPlanCode,
-      metadata: {
-        userId:   req.user._id.toString(),
-        planId:   plan.id,
-        userName: user.name,
-      },
+      name,
+      amount: plan.price,   // Naira — Flutterwave uses real currency, not kobo
+      planId: plan.id,
+      userId: req.user._id.toString(),
     });
 
     res.status(200).json({
       success: true,
-      data: {
-        authorizationUrl: txData.authorization_url,
-        accessCode:       txData.access_code,
-        reference:        txData.reference,
-        plan,
-      },
+      data: { payment_link, tx_ref, plan },
     });
   } catch (err) {
     console.error('initiateSubscription error:', err.message);
@@ -160,38 +140,42 @@ exports.initiateSubscription = async (req, res) => {
 // ─── POST /api/subscriptions/verify ──────────────────────────────────────────
 exports.verifySubscription = async (req, res) => {
   try {
-    const { reference } = req.body;
-    if (!reference) {
-      return res.status(400).json({ success: false, message: 'Reference is required.' });
+    const { tx_ref } = req.body;
+    if (!tx_ref) {
+      return res.status(400).json({ success: false, message: 'tx_ref is required.' });
     }
 
-    const tx = await verifyTransaction(reference);
+    const tx = await verifyPayment(tx_ref);
 
-    console.log('[verify] tx.status:', tx.status);
-    console.log('[verify] tx.metadata:', JSON.stringify(tx.metadata));
-    console.log('[verify] req.user._id:', req.user._id.toString());
-
-    if (tx.status !== 'success') {
-      return res.status(400).json({ success: false, message: `Payment was not successful (status: ${tx.status}).` });
+    if (tx.status !== 'successful') {
+      return res.status(400).json({
+        success: false,
+        message: `Payment was not successful (status: ${tx.status}).`,
+      });
     }
 
-    const { planId, userId } = tx.metadata || {};
+    if (tx.currency !== 'NGN') {
+      return res.status(400).json({ success: false, message: 'Invalid payment currency.' });
+    }
+
+    const { userId, plan: planId } = tx.meta || {};
     const plan = PLANS[planId];
 
-    if (!plan) {
-      console.error('[verify] Unknown planId in metadata:', planId);
+    if (!plan || plan.id === 'free') {
+      console.error('[verify] Unknown or free planId in metadata:', planId);
       return res.status(400).json({ success: false, message: 'Invalid payment metadata: unknown plan.' });
     }
+
     if (userId !== req.user._id.toString()) {
       console.error('[verify] userId mismatch. metadata:', userId, 'req:', req.user._id.toString());
       return res.status(400).json({ success: false, message: 'Invalid payment metadata: user mismatch.' });
     }
 
-    // Paystack includes subscription details when a plan code was used
-    const subscriptionCode = tx.subscription?.subscription_code || null;
-    const customerCode     = tx.customer?.customer_code         || null;
+    if (tx.amount < plan.price) {
+      return res.status(400).json({ success: false, message: 'Payment amount is less than the plan price.' });
+    }
 
-    await activateSubscription(req.user._id, plan, reference, subscriptionCode, customerCode);
+    await activateSubscription(req.user._id, plan, tx_ref);
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
@@ -239,95 +223,35 @@ exports.cancelSubscription = async (req, res) => {
 };
 
 // ─── POST /api/subscriptions/webhook ─────────────────────────────────────────
-// Register this URL in Paystack Dashboard → Settings → Webhooks
-exports.paystackWebhook = async (req, res) => {
-  // Verify Paystack signature against raw body buffer
-  const hash = crypto
-    .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-    .update(req.body)
-    .digest('hex');
-
-  if (hash !== req.headers['x-paystack-signature']) {
-    return res.status(401).json({ message: 'Invalid signature.' });
+// Register this URL in Flutterwave Dashboard → Settings → Webhooks
+// Set Secret Hash to FLW_WEBHOOK_HASH in your .env
+exports.flutterwaveWebhook = async (req, res) => {
+  if (req.headers['verif-hash'] !== process.env.FLW_WEBHOOK_HASH) {
+    return res.status(401).end();
   }
 
-  const { event, data } = JSON.parse(req.body);
+  const payload = req.body;
 
-  // ── First payment or manual charge ────────────────────────────────────────
-  if (event === 'charge.success') {
-    const { metadata, reference, subscription: sub, customer } = data;
-    const { userId, planId } = metadata || {};
-    const plan = PLANS[planId];
-    if (!plan || !userId) return res.sendStatus(200);
+  if (payload.event === 'charge.completed' && payload.data?.status === 'successful') {
+    const tx     = payload.data;
+    const { userId, plan: planId } = tx.meta || {};
+    const plan   = PLANS[planId];
 
-    await activateSubscription(
+    if (!plan || plan.id === 'free' || !userId) return res.status(200).end();
+
+    // Guard: currency and amount must match
+    if (tx.currency !== 'NGN' || tx.amount < plan.price) return res.status(200).end();
+
+    await activateSubscription(userId, plan, tx.tx_ref).catch(console.error);
+
+    notify(
       userId,
-      plan,
-      reference,
-      sub?.subscription_code || null,
-      customer?.customer_code || null
-    );
-
-    notify(userId, 'profile_verified',
+      'profile_verified',
       `${plan.name} Plan Activated! 🎉`,
       `Your ${plan.name} subscription is now active.`,
       {}
     );
   }
 
-  // ── Recurring renewal ─────────────────────────────────────────────────────
-  if (event === 'invoice.payment_succeeded') {
-    const paystackSub = data.subscription;
-    const planCode    = paystackSub?.plan?.plan_code;
-
-    const plan = Object.values(PLANS).find(p => p.paystackPlanCode === planCode);
-    if (!plan) return res.sendStatus(200);
-
-    const sub = await Subscription.findOne({
-      paystackSubscriptionCode: paystackSub.subscription_code,
-    });
-    if (!sub) return res.sendStatus(200);
-
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await Subscription.findOneAndUpdate(
-      { _id: sub._id },
-      {
-        plan:      plan.id,
-        status:    'active',
-        expiresAt,
-        autoRenew: true,
-        $push: {
-          history: {
-            plan:      plan.id,
-            amount:    plan.price,
-            currency:  '₦',
-            reference: data.reference || '',
-            paidAt:    new Date(),
-          },
-        },
-      }
-    );
-
-    await syncProStatus(sub.userId, true, 'subscription');
-
-    notify(sub.userId, 'profile_verified',
-      'Subscription Renewed ✅',
-      `Your ${plan.name} plan has been renewed for another month.`,
-      {}
-    );
-  }
-
-  // ── Subscription disabled / cancelled ─────────────────────────────────────
-  if (event === 'subscription.disable') {
-    const subscriptionCode = data.subscription_code;
-    if (subscriptionCode) {
-      const sub = await Subscription.findOneAndUpdate(
-        { paystackSubscriptionCode: subscriptionCode },
-        { autoRenew: false, status: 'cancelled' }
-      );
-      if (sub) await syncProStatus(sub.userId, false);
-    }
-  }
-
-  res.sendStatus(200);
+  res.status(200).end();
 };

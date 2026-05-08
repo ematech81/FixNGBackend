@@ -19,6 +19,7 @@ const {
   skipVerificationId,
   skipSkillVideo,
   getSkillsList,
+  updateArtisanProfile,
 } = require('../controllers/artisanController');
 const { updateBio } = require('../controllers/discoveryController');
 
@@ -64,6 +65,9 @@ router.post('/onboarding/skip-skill-video', skipSkillVideo);
 
 // Bio update
 router.post('/bio', updateBio);
+
+// Profile edit (post-onboarding)
+router.put('/profile', updateArtisanProfile);
 
 // Utility
 router.get('/skills-list', getSkillsList);
