@@ -1,18 +1,31 @@
-const express = require('express');
-const router  = express.Router();
-const { protect } = require('../middleware/auth');
-const ctrl = require('../controllers/subscriptionController');
+const express    = require('express');
+const router     = express.Router();
+const rateLimit  = require('express-rate-limit');
+const { protect, restrictTo } = require('../middleware/auth');
+const ctrl       = require('../controllers/subscriptionController');
 
-// Public
-router.get('/plans', ctrl.getPlans);
+const initLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many payment attempts. Please try again in an hour.' },
+});
 
-// Flutterwave webhook — no auth, verified via verif-hash header
-router.post('/webhook', ctrl.flutterwaveWebhook);
+const refundLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many refund requests. Please try again in an hour.' },
+});
 
-// Authenticated
-router.get('/me',        protect, ctrl.getMySubscription);
-router.post('/initiate', protect, ctrl.initiateSubscription);
-router.post('/verify',   protect, ctrl.verifySubscription);
-router.post('/cancel',   protect, ctrl.cancelSubscription);
+// ── Kora Pay ──────────────────────────────────────────────────────────────────
+router.get('/me',                protect, restrictTo('artisan'), ctrl.getMySubscription);
+router.post('/initialize',       protect, restrictTo('artisan'), initLimiter, ctrl.initializeSubscription);
+router.get('/verify/:reference', protect, restrictTo('artisan'), ctrl.verifySubscription);
+router.post('/cancel',           protect, restrictTo('artisan'), ctrl.cancelSubscription);
+router.post('/refund',           protect, refundLimiter, ctrl.requestRefund);
+
+// ── Flutterwave legacy ────────────────────────────────────────────────────────
+// initiate → 410 Gone; webhook stays alive for 30-day catch window
+router.post('/initiate', ctrl.initiateSubscription);
+router.post('/webhook',  ctrl.flutterwaveWebhook);
 
 module.exports = router;

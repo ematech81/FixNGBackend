@@ -44,6 +44,31 @@ exports.restrictTo = (...roles) => {
   };
 };
 
+// Gate routes that require an active subscription (trial / active / grace pass; expired / cancelled block)
+exports.requireActiveSubscription = async (req, res, next) => {
+  try {
+    const Subscription = require('../models/Subscription');
+    const sub = await Subscription.findOne({ artisanId: req.user._id }).lean();
+
+    if (!sub || ['expired', 'cancelled'].includes(sub.status)) {
+      return res.status(403).json({
+        success: false,
+        code:    'SUBSCRIPTION_REQUIRED',
+        message: sub?.status === 'cancelled'
+          ? 'Your subscription has been cancelled. Please subscribe to continue.'
+          : 'Your subscription has expired. Please subscribe to continue.',
+        subscriptionStatus: sub?.status || 'none',
+      });
+    }
+
+    req.subscription = sub;
+    next();
+  } catch (err) {
+    console.error('requireActiveSubscription error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
 // Block artisan from receiving jobs if not verified
 exports.requireVerified = async (req, res, next) => {
   try {

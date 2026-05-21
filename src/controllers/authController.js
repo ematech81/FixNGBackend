@@ -194,6 +194,10 @@ exports.verifyRegister = async (req, res) => {
     if (role === 'artisan') {
       try {
         await ArtisanProfile.create({ userId: user._id });
+        // Start 7-day free trial for every new artisan (non-fatal if it fails)
+        require('../helpers/subscriptionHelper').startTrial(user._id).catch(
+          (e) => console.warn('[startTrial] non-fatal on register:', e.message)
+        );
       } catch (profileErr) {
         // Profile creation failed — roll back the user so the phone isn't locked
         await User.findByIdAndDelete(user._id);
@@ -348,6 +352,10 @@ exports.becomeArtisan = async (req, res) => {
     if (!profile) {
       profile = await ArtisanProfile.create({ userId });
       await User.findByIdAndUpdate(userId, { role: 'artisan' });
+      // Start 7-day free trial (non-fatal if it fails)
+      require('../helpers/subscriptionHelper').startTrial(userId).catch(
+        (e) => console.warn('[startTrial] non-fatal on becomeArtisan:', e.message)
+      );
     }
 
     res.status(200).json({

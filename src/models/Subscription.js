@@ -1,53 +1,57 @@
 const mongoose = require('mongoose');
-const PLANS    = require('../constants/subscriptionPlans');
 
 const subscriptionSchema = new mongoose.Schema(
   {
-    userId: {
+    artisanId: {
       type:     mongoose.Schema.Types.ObjectId,
       ref:      'User',
       required: true,
-      unique:   true,  // one subscription record per user, updated in-place
+      unique:   true,
       index:    true,
     },
-    plan: {
-      type:    String,
-      enum:    Object.keys(PLANS),
-      default: 'free',
-    },
+
     status: {
       type:    String,
-      enum:    ['active', 'cancelled', 'expired', 'past_due'],
-      default: 'active',
+      enum:    ['trial', 'active', 'grace', 'expired', 'cancelled'],
+      default: 'trial',
     },
-    startDate: { type: Date, default: Date.now },
-    expiresAt: { type: Date, default: null },   // null = free plan (no expiry)
 
-    // Flutterwave reference (tx_ref)
-    paymentReference: { type: String, default: null },
+    tier: {
+      type:    String,
+      enum:    ['pro'],
+      default: 'pro',
+    },
 
-    autoRenew: { type: Boolean, default: true },
+    cycle: {
+      type:    String,
+      enum:    ['monthly', 'quarterly', 'yearly', 'trial'],
+      default: 'trial',
+    },
 
-    // Payment history
-    history: [
-      {
-        plan:      { type: String },
-        amount:    { type: Number },
-        currency:  { type: String, default: '₦' },
-        reference: { type: String },
-        paidAt:    { type: Date, default: Date.now },
-      },
-    ],
+    startsAt:  { type: Date, required: true },
+    endsAt:    { type: Date, required: true },
+    graceEndsAt: { type: Date, default: null },
+
+    cancelledAt: { type: Date, default: null },
+
+    currentTransactionId: {
+      type:    mongoose.Schema.Types.ObjectId,
+      ref:     'Transaction',
+      default: null,
+    },
   },
   { timestamps: true }
 );
 
-// Convenience: is the subscription currently paid and active?
-subscriptionSchema.virtual('isPaid').get(function () {
-  if (this.plan === 'free') return false;
-  if (this.status !== 'active') return false;
-  if (this.expiresAt && this.expiresAt < new Date()) return false;
-  return true;
+// Convenience: is this subscription currently allowing artisan access?
+subscriptionSchema.virtual('isAllowed').get(function () {
+  return ['trial', 'active', 'grace'].includes(this.status);
+});
+
+// Days remaining until endsAt (0 if already past)
+subscriptionSchema.virtual('daysRemaining').get(function () {
+  const diff = this.endsAt - new Date();
+  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 });
 
 module.exports = mongoose.model('Subscription', subscriptionSchema);

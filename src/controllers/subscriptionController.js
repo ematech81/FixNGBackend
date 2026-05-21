@@ -1,196 +1,164 @@
-const Subscription   = require('../models/Subscription');
+'use strict';
+
+const Subscription  = require('../models/Subscription');
+const Transaction   = require('../models/Transaction');
+const Refund        = require('../models/Refund');
+const User          = require('../models/User');
 const ArtisanProfile = require('../models/ArtisanProfile');
-const User           = require('../models/User');
-const PLANS          = require('../constants/subscriptionPlans');
-const { initializePayment, verifyPayment } = require('../services/flutterwaveService');
-const { notify } = require('./notificationController');
+const korapay       = require('../services/korapayService');
+const helper        = require('../helpers/subscriptionHelper');
+const ENV           = require('../config/env');
 
-// ─── Helper: keep ArtisanProfile.isPro in sync ───────────────────────────────
-const syncProStatus = async (userId, active, source = 'subscription') => {
-  try {
-    if (active) {
-      await ArtisanProfile.findOneAndUpdate(
-        { userId },
-        { isPro: true, proSource: source, proGrantedAt: new Date() },
-        { new: true }
-      );
-    } else {
-      await ArtisanProfile.findOneAndUpdate(
-        { userId, proSource: 'subscription' },
-        { isPro: false, proSource: null, proGrantedAt: null, proGrantedBy: null }
-      );
-    }
-  } catch (e) {
-    console.warn('syncProStatus failed (non-fatal):', e.message);
-  }
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const BACKEND_URL = () => process.env.BACKEND_URL || 'https://fixngbackend-production.up.railway.app';
+
+const makeTxRef = (artisanId) => `FIXNG-${artisanId}-${Date.now()}`;
+
+const formatSub = (sub) => {
+  if (!sub) return null;
+  const now           = new Date();
+  const msRemaining   = Math.max(0, new Date(sub.endsAt) - now);
+  const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
+
+  return {
+    status:         sub.status,
+    tier:           sub.tier,
+    cycle:          sub.cycle,
+    startsAt:       sub.startsAt,
+    endsAt:         sub.endsAt,
+    graceEndsAt:    sub.graceEndsAt,
+    cancelledAt:    sub.cancelledAt,
+    daysRemaining,
+    isAllowed:      ['trial', 'active', 'grace'].includes(sub.status),
+  };
 };
 
-// ─── Helper: activate subscription record ────────────────────────────────────
-const activateSubscription = async (userId, plan, txRef) => {
-  const now      = new Date();
-  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-  await Subscription.findOneAndUpdate(
-    { userId },
-    {
-      plan:             plan.id,
-      status:           'active',
-      startDate:        now,
-      expiresAt,
-      paymentReference: txRef,
-      autoRenew:        true,
-      $push: {
-        history: {
-          plan:      plan.id,
-          amount:    plan.price,
-          currency:  '₦',
-          reference: txRef,
-          paidAt:    now,
-        },
-      },
-    },
-    { upsert: true, new: true }
-  );
-
-  await syncProStatus(userId, true, 'subscription');
-};
-
-// ─── GET /api/subscriptions/plans ────────────────────────────────────────────
-exports.getPlans = (req, res) => {
-  res.status(200).json({ success: true, data: Object.values(PLANS) });
-};
-
-// ─── GET /api/subscriptions/me ───────────────────────────────────────────────
+// ─── GET /api/subscriptions/me ────────────────────────────────────────────────
 exports.getMySubscription = async (req, res) => {
   try {
-    let sub = await Subscription.findOne({ userId: req.user._id }).lean();
+    let sub = await Subscription.findOne({ artisanId: req.user._id }).lean();
 
     if (!sub) {
-      sub = await Subscription.create({ userId: req.user._id, plan: 'free' });
-      sub = sub.toObject();
+      // Auto-create trial for artisans that pre-date Kora Pay migration
+      if (req.user.role === 'artisan') {
+        sub = await helper.startTrial(req.user._id);
+        sub = sub.toObject ? sub.toObject() : sub;
+      } else {
+        return res.status(200).json({ success: true, data: null });
+      }
     }
 
-    // Auto-expire lapsed paid plans
-    if (sub.plan !== 'free' && sub.expiresAt && new Date(sub.expiresAt) < new Date()) {
-      await Subscription.findOneAndUpdate(
-        { userId: req.user._id },
-        { status: 'expired', plan: 'free' }
-      );
-      await syncProStatus(req.user._id, false);
-      sub.status = 'expired';
-      sub.plan   = 'free';
-    }
-
-    const planDetails = PLANS[sub.plan] || PLANS.free;
-    res.status(200).json({ success: true, data: { ...sub, planDetails } });
+    res.status(200).json({ success: true, data: formatSub(sub) });
   } catch (err) {
     console.error('getMySubscription error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch subscription.' });
   }
 };
 
-// ─── POST /api/subscriptions/initiate ────────────────────────────────────────
-exports.initiateSubscription = async (req, res) => {
+// ─── POST /api/subscriptions/initialize ──────────────────────────────────────
+exports.initializeSubscription = async (req, res) => {
+  const { cycle } = req.body;
+
+  if (!['monthly', 'quarterly', 'yearly'].includes(cycle)) {
+    return res.status(400).json({ success: false, message: 'cycle must be monthly, quarterly, or yearly.' });
+  }
+
+  // Only verified artisans can subscribe
+  const profile = await ArtisanProfile.findOne({ userId: req.user._id }).select('verificationStatus').lean();
+  if (!profile || profile.verificationStatus !== 'verified') {
+    return res.status(403).json({
+      success: false,
+      message: 'Your artisan account must be verified before subscribing.',
+    });
+  }
+
+  const amountNGN = ENV.korapay.prices[cycle];
+  const reference = makeTxRef(req.user._id.toString());
+
+  const user  = await User.findById(req.user._id).select('email name phone').lean();
+  const email = user.email || `${String(user.phone).replace(/\+/g, '')}@fixng.app`;
+  const name  = user.name || 'FixNG Artisan';
+
+  const existingSub = await Subscription.findOne({ artisanId: req.user._id }).lean();
+  const type = (!existingSub || existingSub.status === 'trial') ? 'subscription_purchase' : 'subscription_renewal';
+
+  const tx = await Transaction.create({
+    reference,
+    artisanId:     req.user._id,
+    provider:      'korapay',
+    type,
+    cycle,
+    amount:        amountNGN,
+    currency:      'NGN',
+    initializedAt: new Date(),
+  });
+
   try {
-    const { planId } = req.body;
-    const plan = PLANS[planId];
-
-    if (!plan || plan.id === 'free') {
-      return res.status(400).json({ success: false, message: 'Invalid plan selected.' });
-    }
-
-    // Only verified artisans can subscribe
-    const artisanProfile = await ArtisanProfile.findOne({ userId: req.user._id })
-      .select('verificationStatus').lean();
-    if (!artisanProfile || artisanProfile.verificationStatus !== 'verified') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your artisan account must be verified before subscribing. Please wait for admin approval.',
-      });
-    }
-
-    // Check if already on this plan and active
-    const existing = await Subscription.findOne({ userId: req.user._id }).lean();
-    if (existing?.plan === planId && existing?.status === 'active') {
-      return res.status(400).json({ success: false, message: `You are already on the ${plan.name} plan.` });
-    }
-
-    const user  = await User.findById(req.user._id).select('email name phone').lean();
-    const email = user.email || `${String(user.phone).replace(/\+/g, '')}@fixng.app`;
-    const name  = user.name || 'FixNG User';
-
-    const { payment_link, tx_ref } = await initializePayment({
+    const { checkout_url } = await korapay.initializeCharge({
+      reference,
+      amountNGN,
       email,
       name,
-      amount: plan.price,   // Naira — Flutterwave uses real currency, not kobo
-      planId: plan.id,
-      userId: req.user._id.toString(),
+      cycle,
+      artisanId:       req.user._id.toString(),
+      notificationUrl: `${BACKEND_URL()}/api/webhooks/korapay`,
+      redirectUrl:     `fixng://subscription/callback?reference=${reference}`,
     });
 
     res.status(200).json({
       success: true,
-      data: { payment_link, tx_ref, plan },
+      data: { checkout_url, reference, amount: amountNGN, cycle },
     });
   } catch (err) {
-    console.error('initiateSubscription error:', err.message);
+    await Transaction.findByIdAndUpdate(tx._id, {
+      status:           'failed',
+      failedAt:         new Date(),
+      providerResponse: { reason: err.message },
+    });
+    console.error('initializeSubscription error:', err.message);
     res.status(500).json({ success: false, message: 'Payment initialisation failed. Please try again.' });
   }
 };
 
-// ─── POST /api/subscriptions/verify ──────────────────────────────────────────
+// ─── GET /api/subscriptions/verify/:reference ─────────────────────────────────
 exports.verifySubscription = async (req, res) => {
+  const { reference } = req.params;
+
+  const tx = await Transaction.findOne({ reference }).lean();
+  if (!tx) {
+    return res.status(404).json({ success: false, message: 'Transaction not found.' });
+  }
+
+  // Idempotent — already terminal
+  if (tx.status === 'success') {
+    const sub = await Subscription.findOne({ artisanId: tx.artisanId }).lean();
+    return res.status(200).json({ success: true, message: 'Subscription is active.', data: formatSub(sub) });
+  }
+  if (tx.status === 'failed') {
+    return res.status(400).json({ success: false, message: 'This payment was not successful.' });
+  }
+
   try {
-    const { tx_ref } = req.body;
-    if (!tx_ref) {
-      return res.status(400).json({ success: false, message: 'tx_ref is required.' });
-    }
+    const charge = await korapay.verifyCharge(reference);
 
-    const tx = await verifyPayment(tx_ref);
+    const safe = { status: charge.status, amount: charge.amount, currency: charge.currency, reference: charge.reference };
+    await Transaction.findByIdAndUpdate(tx._id, { providerResponse: safe });
 
-    if (tx.status !== 'successful') {
-      return res.status(400).json({
-        success: false,
-        message: `Payment was not successful (status: ${tx.status}).`,
+    if (charge.status === 'success') {
+      await helper.processSuccess(tx._id);
+      const sub = await Subscription.findOne({ artisanId: tx.artisanId }).lean();
+      return res.status(200).json({
+        success: true,
+        message: 'Subscription activated successfully! 🎉',
+        data: formatSub(sub),
       });
     }
 
-    if (tx.currency !== 'NGN') {
-      return res.status(400).json({ success: false, message: 'Invalid payment currency.' });
-    }
-
-    const { userId, plan: planId } = tx.meta || {};
-    const plan = PLANS[planId];
-
-    if (!plan || plan.id === 'free') {
-      console.error('[verify] Unknown or free planId in metadata:', planId);
-      return res.status(400).json({ success: false, message: 'Invalid payment metadata: unknown plan.' });
-    }
-
-    if (userId !== req.user._id.toString()) {
-      console.error('[verify] userId mismatch. metadata:', userId, 'req:', req.user._id.toString());
-      return res.status(400).json({ success: false, message: 'Invalid payment metadata: user mismatch.' });
-    }
-
-    if (tx.amount < plan.price) {
-      return res.status(400).json({ success: false, message: 'Payment amount is less than the plan price.' });
-    }
-
-    await activateSubscription(req.user._id, plan, tx_ref);
-
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-    notify(
-      req.user._id,
-      'profile_verified',
-      `${plan.name} Plan Activated! 🎉`,
-      `Your ${plan.name} subscription is active until ${expiresAt.toLocaleDateString('en-NG')}.`,
-      {}
-    );
-
-    res.status(200).json({
-      success: true,
-      message: `${plan.name} subscription activated successfully.`,
-      data: { plan, expiresAt },
+    await helper.processFailure(tx._id, `Kora Pay status: ${charge.status}`);
+    return res.status(400).json({
+      success: false,
+      message: `Payment was not successful (status: ${charge.status}).`,
     });
   } catch (err) {
     console.error('verifySubscription error:', err.message);
@@ -201,20 +169,16 @@ exports.verifySubscription = async (req, res) => {
 // ─── POST /api/subscriptions/cancel ──────────────────────────────────────────
 exports.cancelSubscription = async (req, res) => {
   try {
-    const sub = await Subscription.findOne({ userId: req.user._id });
-
-    if (!sub || sub.plan === 'free') {
-      return res.status(400).json({ success: false, message: 'No active paid subscription found.' });
+    const sub = await Subscription.findOne({ artisanId: req.user._id });
+    if (!sub || sub.status === 'expired' || sub.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'No active subscription to cancel.' });
     }
 
-    await Subscription.findOneAndUpdate(
-      { userId: req.user._id },
-      { autoRenew: false, status: 'cancelled' }
-    );
+    await Subscription.findByIdAndUpdate(sub._id, { cancelledAt: new Date(), status: 'cancelled' });
 
     res.status(200).json({
       success: true,
-      message: 'Subscription cancelled. Access continues until the end of the current billing period.',
+      message: 'Subscription cancelled. You can request a refund within 48 hours if eligible.',
     });
   } catch (err) {
     console.error('cancelSubscription error:', err);
@@ -222,36 +186,83 @@ exports.cancelSubscription = async (req, res) => {
   }
 };
 
-// ─── POST /api/subscriptions/webhook ─────────────────────────────────────────
-// Register this URL in Flutterwave Dashboard → Settings → Webhooks
-// Set Secret Hash to FLW_WEBHOOK_HASH in your .env
+// ─── POST /api/subscriptions/refund ──────────────────────────────────────────
+exports.requestRefund = async (req, res) => {
+  const { transactionId, reason } = req.body;
+  if (!transactionId || !reason?.trim()) {
+    return res.status(400).json({ success: false, message: 'transactionId and reason are required.' });
+  }
+
+  try {
+    const tx = await Transaction.findById(transactionId);
+    if (!tx) return res.status(404).json({ success: false, message: 'Transaction not found.' });
+
+    const isAdmin = req.user.role === 'admin';
+    const isOwner = tx.artisanId.toString() === req.user._id.toString();
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ success: false, message: 'Not authorised to refund this transaction.' });
+    }
+
+    if (tx.status !== 'success') {
+      return res.status(400).json({ success: false, message: 'Only successful transactions can be refunded.' });
+    }
+
+    const windowMs = ENV.sub.refundWindowHours * 60 * 60 * 1000;
+    const elapsed  = Date.now() - new Date(tx.completedAt).getTime();
+    if (elapsed > windowMs) {
+      return res.status(400).json({
+        success: false,
+        message: `Refund window has closed (${ENV.sub.refundWindowHours}h limit).`,
+      });
+    }
+
+    const sub       = await Subscription.findOne({ artisanId: tx.artisanId });
+    const totalDays = helper.CYCLE_DAYS[tx.cycle] || 30;
+    const remaining = sub ? Math.max(0, (new Date(sub.endsAt) - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+    const refundNGN = Math.round((remaining / totalDays) * tx.amount);
+
+    if (refundNGN <= 0) {
+      return res.status(400).json({ success: false, message: 'Subscription period has fully elapsed — no refundable amount.' });
+    }
+
+    const refundRecord = await Refund.create({
+      transactionId: tx._id,
+      amount:        refundNGN,
+      reason:        reason.trim(),
+      requestedBy:   req.user._id,
+      requestedAt:   new Date(),
+    });
+
+    try {
+      const result = await korapay.initiateRefund({ reference: tx.reference, amountNGN: refundNGN, reason: reason.trim() });
+      await Refund.findByIdAndUpdate(refundRecord._id, { refundReference: result.reference || result.id });
+
+      res.status(200).json({
+        success: true,
+        message: `Refund of ₦${refundNGN.toLocaleString('en-NG')} initiated. Expect 3–5 business days.`,
+        data: { refundAmount: refundNGN, refundId: refundRecord._id },
+      });
+    } catch (providerErr) {
+      await Refund.findByIdAndUpdate(refundRecord._id, { status: 'failed' });
+      throw providerErr;
+    }
+  } catch (err) {
+    console.error('requestRefund error:', err.message);
+    res.status(500).json({ success: false, message: 'Refund initiation failed. Please try again or contact support.' });
+  }
+};
+
+// ─── Flutterwave legacy (P-1) ─────────────────────────────────────────────────
+// initiate → 410 Gone; webhook stays alive for 30-day catch window
+exports.initiateSubscription = (_req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'This payment method is no longer available. Please update the FixNG app.',
+  });
+};
+
 exports.flutterwaveWebhook = async (req, res) => {
-  if (req.headers['verif-hash'] !== process.env.FLW_WEBHOOK_HASH) {
-    return res.status(401).end();
-  }
-
-  const payload = req.body;
-
-  if (payload.event === 'charge.completed' && payload.data?.status === 'successful') {
-    const tx     = payload.data;
-    const { userId, plan: planId } = tx.meta || {};
-    const plan   = PLANS[planId];
-
-    if (!plan || plan.id === 'free' || !userId) return res.status(200).end();
-
-    // Guard: currency and amount must match
-    if (tx.currency !== 'NGN' || tx.amount < plan.price) return res.status(200).end();
-
-    await activateSubscription(userId, plan, tx.tx_ref).catch(console.error);
-
-    notify(
-      userId,
-      'profile_verified',
-      `${plan.name} Plan Activated! 🎉`,
-      `Your ${plan.name} subscription is now active.`,
-      {}
-    );
-  }
-
+  if (req.headers['verif-hash'] !== process.env.FLW_WEBHOOK_HASH) return res.status(401).end();
+  console.log('[flutterwaveWebhook] legacy event received:', req.body?.event);
   res.status(200).end();
 };
