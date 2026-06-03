@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const ArtisanProfile = require('../models/ArtisanProfile');
-const { sendOTP, verifyOTP, normalizePhone } = require('../services/twilioService');
+const { sendOTP, verifyOTP, normalizePhone } = require('../services/smsService');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, {
