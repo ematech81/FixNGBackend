@@ -75,6 +75,8 @@ const UserSchema = new mongoose.Schema(
 );
 
 UserSchema.index({ isActive: 1 });
+// Sparse index allows fast lookup by email while tolerating null values (phone-only users)
+UserSchema.index({ email: 1 }, { sparse: true });
 
 // Hash password before saving (skip if phone-only user has no password)
 UserSchema.pre('save', async function (next) {

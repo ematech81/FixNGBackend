@@ -51,7 +51,7 @@ exports.checkDevice = async (req, res) => {
   }
 
   try {
-    const { normalizePhone } = require('../services/twilioService');
+    const { normalizePhone } = require('../services/smsService');
     const normalized = normalizePhone(phone.trim());
 
     // Block banned devices before anything else
@@ -87,7 +87,7 @@ exports.checkDevice = async (req, res) => {
     }
 
     // Unknown device — send OTP
-    const { sendOTP } = require('../services/twilioService');
+    const { sendOTP } = require('../services/smsService');
     await sendOTP(normalized);
 
     return res.status(200).json({

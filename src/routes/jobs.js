@@ -1,7 +1,18 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const { protect, restrictTo, requireVerified } = require('../middleware/auth');
 const { uploadJobMedia, handleUploadError } = require('../middleware/upload');
+
+// 10 job posts per user per hour
+const createJobLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many job posts. Please wait before posting again.' },
+});
 const {
   createJob,
   getAvailableJobs,
@@ -21,6 +32,7 @@ router.post(
   '/',
   protect,
   restrictTo('customer', 'artisan'),
+  createJobLimiter,
   uploadJobMedia,
   handleUploadError,
   createJob

@@ -429,11 +429,24 @@ exports.markArrived = async (req, res) => {
 // ─── POST /api/jobs/:jobId/complete — Artisan marks job complete ───────────────
 exports.markCompleted = async (req, res) => {
   try {
-    const job = await Job.findOne({
-      _id: req.params.jobId,
-      assignedArtisanId: req.user._id,
-      status: 'in-progress',
-    });
+    const now = new Date();
+
+    // Atomic: only succeeds if still in-progress and assigned to this artisan.
+    // Prevents double-completion if the request fires twice.
+    const job = await Job.findOneAndUpdate(
+      {
+        _id: req.params.jobId,
+        assignedArtisanId: req.user._id,
+        status: 'in-progress',
+      },
+      {
+        $set: {
+          status: 'completed',
+          'timeline.completedAt': now,
+        },
+      },
+      { new: true }
+    );
 
     if (!job) {
       return res.status(404).json({
@@ -441,10 +454,6 @@ exports.markCompleted = async (req, res) => {
         message: 'Job not found or not in progress.',
       });
     }
-
-    job.status = 'completed';
-    job.timeline.completedAt = new Date();
-    await job.save();
 
     // Update artisan stats
     await ArtisanProfile.findOneAndUpdate(
