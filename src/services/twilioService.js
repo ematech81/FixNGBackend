@@ -16,10 +16,42 @@ const normalizePhone = (phone) => {
   return `+234${cleaned}`;
 };
 
+// ── Provider-aware SMS dispatch ───────────────────────────────────────────────
+// Wraps provider selection so Twilio code is completely untouched.
+// Set SMS_PROVIDER=bulksms in .env to switch; defaults to 'twilio'.
+const sendOtpSms = async (phoneNumber, otpCode) => {
+  const provider = process.env.SMS_PROVIDER || 'twilio';
+
+  if (provider === 'bulksms') {
+    const bulkSms = require('./bulkSmsService');
+    return await bulkSms.sendOTP(phoneNumber, otpCode);
+  } else {
+    // ── TWILIO — original code unchanged ─────────────────────────────────────
+    const twilio = require('twilio');
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const fromPhone = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!fromPhone) {
+      throw new Error('TWILIO_PHONE_NUMBER is not set in .env');
+    }
+
+    await client.messages.create({
+      body: `Your FixNG verification code is: ${otpCode}\n\nValid for ${OTP_EXPIRES_MINUTES} minutes. Do not share this code.`,
+      from: fromPhone,
+      to: phoneNumber,
+    });
+  }
+};
+
 // Send OTP — uses Twilio in production, logs to console in dev mode
 exports.sendOTP = async (phone) => {
   const normalized = normalizePhone(phone);
-  const otp = generateOTP();
+  const provider   = process.env.SMS_PROVIDER || 'twilio';
+
+  // BulkSMS path uses alphanumeric OTP; Twilio path keeps existing numeric OTP
+  const otp = provider === 'bulksms'
+    ? require('./bulkSmsService').generateAlphanumericOTP()
+    : generateOTP();
 
   // Hash before storing — raw OTP is never persisted
   const salt = await bcrypt.genSalt(10);
@@ -40,20 +72,7 @@ exports.sendOTP = async (phone) => {
     console.log(`  Expires: ${OTP_EXPIRES_MINUTES} minutes`);
     console.log('================================================\n');
   } else {
-    // ── PRODUCTION — send via Twilio ──────────────────────────────────────────
-    const twilio = require('twilio');
-    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromPhone = process.env.TWILIO_PHONE_NUMBER;
-
-    if (!fromPhone) {
-      throw new Error('TWILIO_PHONE_NUMBER is not set in .env');
-    }
-
-    await client.messages.create({
-      body: `Your FixNG verification code is: ${otp}\n\nValid for ${OTP_EXPIRES_MINUTES} minutes. Do not share this code.`,
-      from: fromPhone,
-      to: normalized,
-    });
+    await sendOtpSms(normalized, otp);
   }
 
   return { normalized };

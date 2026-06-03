@@ -120,7 +120,7 @@ exports.sendOTPHandler = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'OTP sent. Please check your SMS.',
+      message: 'Your access key has been sent. It may take up to 2 minutes to arrive.',
       phone: normalized,
     });
   } catch (err) {
