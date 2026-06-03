@@ -262,15 +262,12 @@ exports.acceptJob = async (req, res) => {
         status: { $in: ['accepted', 'in-progress'] },
       });
       if (activeCount >= limit) {
-        const requiredPlan = plan === 'free' ? 'pro' : 'elite';
         return res.status(403).json({
           success: false,
           limitReached: true,
           currentPlan: plan,
-          requiredPlan,
-          message: plan === 'free'
-            ? `Free accounts can only accept ${limit} jobs at a time. Upgrade to Pro to accept up to 10.`
-            : `Pro accounts can only accept ${limit} jobs at a time. Upgrade to Elite for unlimited.`,
+          requiredPlan: 'pro',
+          message: `Free accounts can only hold ${limit} active jobs at a time. Subscribe to Pro for unlimited jobs.`,
         });
       }
     }
