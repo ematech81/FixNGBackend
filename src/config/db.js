@@ -8,13 +8,32 @@ const connectDB = async () => {
     });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
 
-    // Drop the stale non-sparse email_1 unique index if it still exists.
-    // We removed the unique constraint from the schema, so this index is no longer needed.
+    // Drop stale indexes left over from old schema versions
+    const drops = [
+      { collection: 'users',         index: 'email_1'  },
+      { collection: 'subscriptions', index: 'userId_1' }, // old field; new schema uses artisanId
+    ];
+    for (const { collection, index } of drops) {
+      try {
+        await conn.connection.collection(collection).dropIndex(index);
+        console.log(`Dropped stale ${index} index on ${collection}`);
+      } catch {
+        // Index doesn't exist — that's fine
+      }
+    }
+
+    // Migrate old subscription documents: copy userId → artisanId for any
+    // document written before the Kora Pay migration that still uses the old field name.
     try {
-      await conn.connection.collection('users').dropIndex('email_1');
-      console.log('Dropped stale email_1 index');
-    } catch {
-      // Index doesn't exist — that's fine
+      const result = await conn.connection.collection('subscriptions').updateMany(
+        { userId: { $exists: true }, artisanId: { $exists: false } },
+        [{ $set: { artisanId: '$userId' } }]
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`Migrated ${result.modifiedCount} subscription(s): userId → artisanId`);
+      }
+    } catch (err) {
+      console.error('Subscription migration error:', err.message);
     }
   } catch (err) {
     console.error('MongoDB connection error:', err.message);

@@ -2,6 +2,7 @@
 
 const cron         = require('node-cron');
 const Subscription = require('../models/Subscription');
+const Job          = require('../models/Job');
 const { syncProStatus } = require('../helpers/subscriptionHelper');
 const { notify }   = require('../controllers/notificationController');
 
@@ -52,6 +53,14 @@ const tick = async () => {
         {}
       );
       console.log('[subscriptionTick] trial→expired', sub.artisanId);
+    }
+    // ── pending jobs past expiresAt → expired ────────────────────────────────
+    const expiredJobs = await Job.updateMany(
+      { status: 'pending', expiresAt: { $lt: now } },
+      { $set: { status: 'expired' } }
+    );
+    if (expiredJobs.modifiedCount > 0) {
+      console.log('[subscriptionTick] expired', expiredJobs.modifiedCount, 'stale jobs');
     }
   } catch (err) {
     console.error('[subscriptionTick] error:', err.message);

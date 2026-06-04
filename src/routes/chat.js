@@ -5,11 +5,11 @@ const { protect, restrictTo } = require('../middleware/auth');
 const { uploadChatImage, uploadChatAudio, handleUploadError } = require('../middleware/upload');
 const { getChatHistory, sendMessage, sendImageMessage, sendAudioMessage, getConversations } = require('../controllers/chatController');
 
-// 60 messages per user per minute
+// 60 messages per user per minute (keyed by user ID — protect middleware always runs first)
 const messageLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => req.user._id.toString(),
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many messages. Please slow down.' },

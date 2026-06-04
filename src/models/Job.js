@@ -63,7 +63,7 @@ const JobSchema = new mongoose.Schema(
     // ── Status lifecycle: pending → accepted → in-progress → completed / disputed ──
     status: {
       type: String,
-      enum: ['pending', 'accepted', 'in-progress', 'completed', 'disputed', 'cancelled'],
+      enum: ['pending', 'accepted', 'in-progress', 'completed', 'disputed', 'cancelled', 'expired'],
       default: 'pending',
     },
 
