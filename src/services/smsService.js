@@ -5,7 +5,9 @@ const OTP     = require('../models/OTP');
 const bulkSms = require('./bulkSmsService');
 
 const OTP_EXPIRES_MINUTES = 10;
-const CONSOLE_MODE = process.env.FORCE_CONSOLE_OTP === 'true';
+const CONSOLE_MODE    = process.env.FORCE_CONSOLE_OTP === 'true';
+const REVIEWER_PHONE  = process.env.REVIEWER_PHONE  || null; // e.g. +2349011495230
+const REVIEWER_OTP    = process.env.REVIEWER_OTP    || null; // fixed OTP for Play Store reviewer
 
 // Normalize Nigerian phone to E.164 (+234...)
 const normalizePhone = (phone) => {
@@ -18,8 +20,9 @@ const normalizePhone = (phone) => {
 
 // Send OTP via BulkSMS Nigeria
 exports.sendOTP = async (phone) => {
-  const normalized = normalizePhone(phone);
-  const otp        = bulkSms.generateAlphanumericOTP();
+  const normalized   = normalizePhone(phone);
+  const isReviewer   = REVIEWER_PHONE && normalized === normalizePhone(REVIEWER_PHONE);
+  const otp          = (isReviewer && REVIEWER_OTP) ? REVIEWER_OTP : bulkSms.generateAlphanumericOTP();
 
   // Hash before storing — raw OTP is never persisted
   const salt    = await bcrypt.genSalt(10);
@@ -31,14 +34,14 @@ exports.sendOTP = async (phone) => {
   await OTP.create({ phone: normalized, otpHash, expiresAt });
 
   if (CONSOLE_MODE) {
-    // Dev mode — log to console instead of sending SMS
     console.log('\n================================================');
     console.log('  📱 OTP (CONSOLE MODE — not sent via SMS)');
     console.log(`  Phone  : ${normalized}`);
     console.log(`  Code   : ${otp}`);
     console.log(`  Expires: ${OTP_EXPIRES_MINUTES} minutes`);
     console.log('================================================\n');
-  } else {
+  } else if (!isReviewer) {
+    // Reviewer account uses fixed OTP — no SMS needed
     await bulkSms.sendOTP(normalized, otp);
   }
 
