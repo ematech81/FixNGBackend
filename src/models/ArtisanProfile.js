@@ -134,10 +134,12 @@ const ArtisanProfileSchema = new mongoose.Schema(
     isBanned: { type: Boolean, default: false },
     banReason: { type: String, default: null },
 
-    // Dispatch Rider extra fields — only populated when skills includes 'Dispatch Rider'
+    // Dispatch Rider extra fields — only populated when skills includes 'Dispatch Rider'.
+    // No defaults on vehicleType/plateNumber so they stay absent (undefined) on non-dispatch
+    // profiles — avoids Mongoose v7 enum validation error when value is null.
     dispatchInfo: {
-      vehicleType:       { type: String, enum: ['Motorcycle', 'Bicycle', 'Car', 'Van'], default: null },
-      plateNumber:       { type: String, default: null, trim: true },
+      vehicleType:       { type: String, enum: ['Motorcycle', 'Bicycle', 'Car', 'Van'] },
+      plateNumber:       { type: String, trim: true },
       hasHelmet:         { type: Boolean, default: false },
       providesPackaging: { type: Boolean, default: false },
     },
