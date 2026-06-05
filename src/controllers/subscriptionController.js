@@ -83,6 +83,13 @@ exports.initializeSubscription = async (req, res) => {
   const existingSub = await Subscription.findOne({ artisanId: req.user._id }).lean();
   const type = (!existingSub || existingSub.status === 'trial') ? 'subscription_purchase' : 'subscription_renewal';
 
+  // Cancel any stale pending transactions — Kora Pay returns 409 if the same
+  // customer email already has an active pending charge on their end.
+  await Transaction.updateMany(
+    { artisanId: req.user._id, status: 'pending' },
+    { $set: { status: 'failed', failedAt: new Date(), providerResponse: { reason: 'superseded by new attempt' } } }
+  );
+
   const tx = await Transaction.create({
     reference,
     artisanId:     req.user._id,
@@ -117,6 +124,14 @@ exports.initializeSubscription = async (req, res) => {
       providerResponse: { reason: err.message },
     });
     console.error('initializeSubscription error:', err.message);
+
+    const statusCode = err.response?.status;
+    if (statusCode === 409) {
+      return res.status(409).json({
+        success: false,
+        message: 'A payment is already in progress. Please wait a moment and try again.',
+      });
+    }
     res.status(500).json({ success: false, message: 'Payment initialisation failed. Please try again.' });
   }
 };
