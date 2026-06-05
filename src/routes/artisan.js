@@ -20,6 +20,7 @@ const {
   skipSkillVideo,
   getSkillsList,
   updateArtisanProfile,
+  saveDispatchInfo,
 } = require('../controllers/artisanController');
 const { updateBio } = require('../controllers/discoveryController');
 
@@ -62,6 +63,9 @@ router.post('/onboarding/skill-video-url',   saveSkillVideoUrl);
 // Skip optional steps
 router.post('/onboarding/skip-verification-id', skipVerificationId);
 router.post('/onboarding/skip-skill-video', skipSkillVideo);
+
+// Dispatch rider extra info
+router.post('/onboarding/dispatch-info', saveDispatchInfo);
 
 // Bio update
 router.post('/bio', updateBio);

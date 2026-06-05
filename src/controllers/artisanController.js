@@ -54,6 +54,7 @@ exports.getOnboardingStatus = async (req, res) => {
         banReason: profile.banReason || null,
         isPro: profile.isPro || false,
         proSource: profile.proSource || null,
+        dispatchInfo: profile.dispatchInfo || null,
       },
     });
   } catch (err) {
@@ -443,6 +444,49 @@ exports.skipSkillVideo = async (req, res) => {
   } catch (err) {
     console.error('skipSkillVideo error:', err);
     res.status(500).json({ success: false, message: 'Could not skip step. Please try again.' });
+  }
+};
+
+// ─── POST /api/artisan/onboarding/dispatch-info ──────────────────────────────
+exports.saveDispatchInfo = async (req, res) => {
+  try {
+    const { vehicleType, plateNumber, hasHelmet, providesPackaging } = req.body;
+
+    const VALID_VEHICLES = ['Motorcycle', 'Bicycle', 'Car', 'Van'];
+    if (!vehicleType || !VALID_VEHICLES.includes(vehicleType)) {
+      return res.status(400).json({ success: false, message: 'Please select a valid vehicle type.' });
+    }
+
+    if (!plateNumber || !plateNumber.trim()) {
+      return res.status(400).json({ success: false, message: 'Vehicle plate number is required.' });
+    }
+
+    const plate = plateNumber.trim();
+    if (plate.length < 5 || /[^A-Za-z0-9 \-]/.test(plate)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid vehicle plate number.' });
+    }
+
+    const profile = await ArtisanProfile.findOneAndUpdate(
+      { userId: req.user._id },
+      {
+        $set: {
+          'dispatchInfo.vehicleType':       vehicleType,
+          'dispatchInfo.plateNumber':        plate.toUpperCase(),
+          'dispatchInfo.hasHelmet':          hasHelmet === true || hasHelmet === 'true',
+          'dispatchInfo.providesPackaging':  providesPackaging === true || providesPackaging === 'true',
+        },
+      },
+      { new: true }
+    );
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    res.status(200).json({ success: true, data: profile.dispatchInfo });
+  } catch (err) {
+    console.error('saveDispatchInfo error:', err);
+    res.status(500).json({ success: false, message: 'Failed to save dispatch info.' });
   }
 };
 

@@ -168,6 +168,7 @@ exports.getArtisanProfile = async (req, res) => {
           onTimeArrivalRate: profile.stats.onTimeArrivalRate,
           acceptanceRate: profile.stats.acceptanceRate,
         },
+        dispatchInfo: profile.skills?.includes('Dispatch Rider') ? (profile.dispatchInfo || null) : null,
       },
     });
   } catch (err) {

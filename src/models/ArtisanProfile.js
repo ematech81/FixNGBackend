@@ -134,6 +134,14 @@ const ArtisanProfileSchema = new mongoose.Schema(
     isBanned: { type: Boolean, default: false },
     banReason: { type: String, default: null },
 
+    // Dispatch Rider extra fields — only populated when skills includes 'Dispatch Rider'
+    dispatchInfo: {
+      vehicleType:       { type: String, enum: ['Motorcycle', 'Bicycle', 'Car', 'Van'], default: null },
+      plateNumber:       { type: String, default: null, trim: true },
+      hasHelmet:         { type: Boolean, default: false },
+      providesPackaging: { type: Boolean, default: false },
+    },
+
     // Performance metrics — populated as jobs are completed
     stats: {
       totalJobs: { type: Number, default: 0 },
