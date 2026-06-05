@@ -22,7 +22,7 @@ const headers = () => ({ Authorization: `Bearer ${secret()}` });
 const initializeCharge = async ({ reference, amountNGN, email, name, cycle, artisanId, notificationUrl, redirectUrl }) => {
   const payload = {
     reference,
-    amount:           amountNGN * 100,   // Kora Pay expects kobo
+    amount:           amountNGN,          // Kora Pay expects Naira (not kobo unlike Flutterwave)
     currency:         'NGN',
     notification_url: notificationUrl,
     redirect_url:     redirectUrl,
@@ -88,7 +88,7 @@ const initiateRefund = async ({ reference, amountNGN, reason }) => {
     `${BASE}/refunds`,
     {
       transaction_reference: reference,
-      amount: amountNGN * 100,
+      amount: amountNGN,   // Kora Pay expects Naira
       reason,
     },
     { headers: headers() }
