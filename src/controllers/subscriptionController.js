@@ -77,7 +77,10 @@ exports.initializeSubscription = async (req, res) => {
   const reference = makeTxRef(req.user._id.toString());
 
   const user  = await User.findById(req.user._id).select('email name phone').lean();
-  const email = user.email || `${String(user.phone).replace(/\+/g, '')}@fixng.app`;
+  // Use a reference-scoped email when no real email exists so each Kora Pay
+  // charge has a unique customer email — prevents 409 "duplicate pending charge"
+  // conflicts when the same phone-based email was used in a previous attempt.
+  const email = user.email || `${reference.toLowerCase()}@fixng.app`;
   const name  = user.name || 'FixNG Artisan';
 
   const existingSub = await Subscription.findOne({ artisanId: req.user._id }).lean();

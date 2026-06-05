@@ -347,10 +347,15 @@ exports.becomeArtisan = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Idempotent — if they already have a profile, just return it
-    let profile = await ArtisanProfile.findOne({ userId });
-    if (!profile) {
-      profile = await ArtisanProfile.create({ userId });
+    // Upsert instead of create — bypasses Mongoose validators so schema
+    // changes (e.g. new enum fields) never break onboarding for new artisans.
+    const isNew = !(await ArtisanProfile.exists({ userId }));
+    const profile = await ArtisanProfile.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId } },
+      { upsert: true, new: true }
+    );
+    if (isNew) {
       await User.findByIdAndUpdate(userId, { role: 'artisan' });
       // Start 7-day free trial (non-fatal if it fails)
       require('../helpers/subscriptionHelper').startTrial(userId).catch(
