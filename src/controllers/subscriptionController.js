@@ -134,6 +134,14 @@ exports.initializeSubscription = async (req, res) => {
       providerResponse: { reason: err.message, korapayBody },
     });
 
+    // AA021 = merchant daily pay-in limit exceeded
+    if (korapayBody?.code === 'AA021') {
+      return res.status(503).json({
+        success: false,
+        message: 'Payments are temporarily unavailable. Please try again later or contact support.',
+      });
+    }
+
     if (korapayStatus === 409) {
       return res.status(409).json({
         success: false,
