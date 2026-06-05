@@ -20,25 +20,42 @@ const headers = () => ({ Authorization: `Bearer ${secret()}` });
  * @returns {{ checkout_url: string }}
  */
 const initializeCharge = async ({ reference, amountNGN, email, name, cycle, artisanId, notificationUrl, redirectUrl }) => {
-  const { data } = await axios.post(
+  const payload = {
+    reference,
+    amount:           amountNGN * 100,   // Kora Pay expects kobo
+    currency:         'NGN',
+    notification_url: notificationUrl,
+    redirect_url:     redirectUrl,
+    customer: { email, name },
+    metadata: { artisanId, cycle },
+  };
+
+  console.log('[KoraPay] initializeCharge request:', JSON.stringify({
+    reference: payload.reference,
+    amount:    payload.amount,
+    currency:  payload.currency,
+    email:     payload.customer.email,
+    name:      payload.customer.name,
+    redirect_url: payload.redirect_url,
+  }));
+
+  // Use validateStatus:true so we always get the response body, even on errors
+  const response = await axios.post(
     `${BASE}/charges/initialize`,
-    {
-      reference,
-      amount:           amountNGN * 100,   // Kora Pay expects kobo
-      currency:         'NGN',
-      notification_url: notificationUrl,
-      redirect_url:     redirectUrl,
-      customer: { email, name },
-      metadata: { artisanId, cycle },
-    },
-    { headers: headers() }
+    payload,
+    { headers: headers(), validateStatus: () => true }
   );
 
-  if (data.status !== true || !data.data?.checkout_url) {
-    throw new Error(data.message || 'Kora Pay did not return a checkout URL.');
+  console.log('[KoraPay] initializeCharge response:', response.status, JSON.stringify(response.data));
+
+  if (response.status !== 200 || response.data?.status !== true || !response.data?.data?.checkout_url) {
+    const err = new Error(response.data?.message || `Kora Pay returned HTTP ${response.status}`);
+    err.korapayStatus = response.status;
+    err.korapayData   = response.data;
+    throw err;
   }
 
-  return { checkout_url: data.data.checkout_url };
+  return { checkout_url: response.data.data.checkout_url };
 };
 
 /**

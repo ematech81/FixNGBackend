@@ -121,21 +121,29 @@ exports.initializeSubscription = async (req, res) => {
       data: { checkout_url, reference, amount: amountNGN, cycle },
     });
   } catch (err) {
+    const korapayStatus = err.korapayStatus || err.response?.status;
+    const korapayBody   = err.korapayData   || err.response?.data;
+
+    console.error('[initializeSubscription] Kora Pay HTTP status:', korapayStatus);
+    console.error('[initializeSubscription] Kora Pay response body:', JSON.stringify(korapayBody));
+    console.error('[initializeSubscription] err.message:', err.message);
+
     await Transaction.findByIdAndUpdate(tx._id, {
       status:           'failed',
       failedAt:         new Date(),
-      providerResponse: { reason: err.message },
+      providerResponse: { reason: err.message, korapayBody },
     });
-    console.error('initializeSubscription error:', err.message);
 
-    const statusCode = err.response?.status;
-    if (statusCode === 409) {
+    if (korapayStatus === 409) {
       return res.status(409).json({
         success: false,
-        message: 'A payment is already in progress. Please wait a moment and try again.',
+        message: korapayBody?.message || 'A payment is already in progress. Please wait a moment and try again.',
       });
     }
-    res.status(500).json({ success: false, message: 'Payment initialisation failed. Please try again.' });
+    res.status(500).json({
+      success: false,
+      message: korapayBody?.message || 'Payment initialisation failed. Please try again.',
+    });
   }
 };
 
