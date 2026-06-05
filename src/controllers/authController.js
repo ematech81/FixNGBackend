@@ -54,17 +54,23 @@ exports.checkDevice = async (req, res) => {
     const { normalizePhone } = require('../services/smsService');
     const normalized = normalizePhone(phone.trim());
 
-    // Block banned devices before anything else
-    const bannedDeviceOwner = await User.findOne({ isActive: false, 'knownDevices.deviceId': deviceId.trim() });
-    if (bannedDeviceOwner) {
-      return res.status(403).json({
-        success: false,
-        isDeviceBanned: true,
-        message: 'This device has been blocked from FixNG.',
-      });
-    }
-
     const user = await User.findOne({ phone: normalized });
+
+    // Admin accounts always bypass device bans — they must be able to log in
+    // from any device regardless of whether that device was previously flagged.
+    const isAdmin = user?.role === 'admin';
+
+    if (!isAdmin) {
+      // Block banned devices for non-admin users
+      const bannedDeviceOwner = await User.findOne({ isActive: false, 'knownDevices.deviceId': deviceId.trim() });
+      if (bannedDeviceOwner) {
+        return res.status(403).json({
+          success: false,
+          isDeviceBanned: true,
+          message: 'This device has been blocked from FixNG.',
+        });
+      }
+    }
 
     if (!user) {
       // Phone not registered — OTP needed for registration flow
