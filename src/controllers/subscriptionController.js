@@ -13,7 +13,7 @@ const ENV           = require('../config/env');
 
 const BACKEND_URL = () => process.env.BACKEND_URL || 'https://fixngbackend-production.up.railway.app';
 
-const makeTxRef = (artisanId) => `FIXNG-${artisanId}-${Date.now()}`;
+const makeTxRef = (artisanId) => `FIXNG_${artisanId}_${Date.now()}`;
 
 const formatSub = (sub) => {
   if (!sub) return null;
