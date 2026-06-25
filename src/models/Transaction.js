@@ -59,4 +59,18 @@ const transactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Partial unique index — at most ONE pending transaction per artisan at any time.
+// Prevents double-charge from concurrent POST /subscriptions/initialize requests:
+// both requests mark old pending→failed (updateMany finds 0 records under a race),
+// then both try to create; the second hits E11000 → controller returns 429.
+// The constraint is automatically released once the transaction leaves 'pending'.
+transactionSchema.index(
+  { artisanId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending' },
+    name: 'unique_pending_per_artisan',
+  }
+);
+
 module.exports = mongoose.model('Transaction', transactionSchema);

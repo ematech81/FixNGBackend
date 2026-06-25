@@ -55,8 +55,9 @@ exports.searchArtisans = async (req, res) => {
       const radiusMeters = parseFloat(maxDistance) * 1000;
 
       // $near doesn't support multi-key sort, so we fetch and sort in-memory.
-      // Fetch a larger pool so Pro artisans can bubble up after sort.
-      const fetchLimit = Math.max(parseInt(limit) * 3, 60);
+      // Pool of 500 supports ~25 pages of 20 — enough for the densest Nigerian cities.
+      // Previously capped at 60 (3 pages max), which silently truncated results.
+      const fetchLimit = Math.min(500, limit * 10);
       const raw = await ArtisanProfile.find({
         ...query,
         location: {

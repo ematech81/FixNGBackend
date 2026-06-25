@@ -43,7 +43,7 @@ const initializeCharge = async ({ reference, amountNGN, email, name, cycle, arti
   const response = await axios.post(
     `${BASE}/charges/initialize`,
     payload,
-    { headers: headers(), validateStatus: () => true }
+    { headers: headers(), validateStatus: () => true, timeout: 20000 }
   );
 
   console.log('[KoraPay] initializeCharge response:', response.status, JSON.stringify(response.data));
@@ -65,7 +65,7 @@ const initializeCharge = async ({ reference, amountNGN, email, name, cycle, arti
 const verifyCharge = async (reference) => {
   const { data } = await axios.get(
     `${BASE}/charges/${encodeURIComponent(reference)}`,
-    { headers: headers() }
+    { headers: headers(), timeout: 20000 }
   );
 
   if (data.status !== true) {
@@ -91,7 +91,7 @@ const initiateRefund = async ({ reference, amountNGN, reason }) => {
       amount: amountNGN,   // Kora Pay expects Naira
       reason,
     },
-    { headers: headers() }
+    { headers: headers(), timeout: 20000 }
   );
 
   if (data.status !== true) {

@@ -93,16 +93,29 @@ exports.initializeSubscription = async (req, res) => {
     { $set: { status: 'failed', failedAt: new Date(), providerResponse: { reason: 'superseded by new attempt' } } }
   );
 
-  const tx = await Transaction.create({
-    reference,
-    artisanId:     req.user._id,
-    provider:      'korapay',
-    type,
-    cycle,
-    amount:        amountNGN,
-    currency:      'NGN',
-    initializedAt: new Date(),
-  });
+  let tx;
+  try {
+    tx = await Transaction.create({
+      reference,
+      artisanId:     req.user._id,
+      provider:      'korapay',
+      type,
+      cycle,
+      amount:        amountNGN,
+      currency:      'NGN',
+      initializedAt: new Date(),
+    });
+  } catch (createErr) {
+    // Partial unique index: a pending transaction already exists for this artisan
+    // (concurrent double-tap). Tell the client to wait for the existing payment.
+    if (createErr.code === 11000) {
+      return res.status(429).json({
+        success: false,
+        message: 'A payment is already in progress. Please wait a moment and try again.',
+      });
+    }
+    throw createErr;
+  }
 
   try {
     const { checkout_url } = await korapay.initializeCharge({
