@@ -89,7 +89,9 @@ exports.searchArtisans = async (req, res) => {
     const userLat = latitude ? parseFloat(latitude) : null;
     const userLng = longitude ? parseFloat(longitude) : null;
 
-    const artisans = profiles.map((p) => {
+    const artisans = profiles
+      .filter((p) => p.userId != null)  // skip orphaned profiles whose user was deleted
+      .map((p) => {
       let distanceKm = null;
       if (userLat && userLng && p.location?.coordinates?.length === 2) {
         const [artisanLng, artisanLat] = p.location.coordinates;
@@ -136,6 +138,12 @@ exports.getArtisanProfile = async (req, res) => {
     }
 
     if (profile.isBanned || profile.isSuspended) {
+      return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
+    }
+
+    // Guard: populate returns null when the user document has been deleted
+    if (!profile.userId) {
+      console.error(`getArtisanProfile: orphaned profile for artisanId=${artisanId} (user deleted)`);
       return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
     }
 
