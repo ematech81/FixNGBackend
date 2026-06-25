@@ -2,6 +2,15 @@ const ArtisanProfile = require('../models/ArtisanProfile');
 const cloudinary = require('../config/cloudinary');
 const ARTISAN_SKILLS = require('../constants/skills');
 
+// Validate that a URL came from Cloudinary before storing it
+const isCloudinaryUrl = (url) => {
+  try {
+    return new URL(url).hostname === 'res.cloudinary.com';
+  } catch {
+    return false;
+  }
+};
+
 // ─── Helper: delete old cloudinary asset if replacing ─────────────────────────
 const deleteCloudinaryAsset = async (publicId, resourceType = 'image') => {
   if (!publicId) return;
@@ -322,6 +331,10 @@ exports.saveProfilePhotoUrl = async (req, res) => {
       return res.status(400).json({ success: false, message: 'url and publicId are required.' });
     }
 
+    if (!isCloudinaryUrl(url)) {
+      return res.status(400).json({ success: false, message: 'Invalid photo URL.' });
+    }
+
     const profile = await ArtisanProfile.findOne({ userId: req.user._id });
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Artisan profile not found.' });
@@ -354,6 +367,10 @@ exports.saveSkillVideoUrl = async (req, res) => {
     const { url, publicId } = req.body;
     if (!url || !publicId) {
       return res.status(400).json({ success: false, message: 'url and publicId are required.' });
+    }
+
+    if (!isCloudinaryUrl(url)) {
+      return res.status(400).json({ success: false, message: 'Invalid video URL.' });
     }
 
     const profile = await ArtisanProfile.findOne({ userId: req.user._id });

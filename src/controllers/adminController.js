@@ -9,23 +9,27 @@ const { notify } = require('./notificationController');
 // ─── GET /api/admin/users — List all users with filters ──────────────────────
 exports.getUsers = async (req, res) => {
   try {
-    const { role, page = 1, limit = 30, search } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { role, search } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip  = (page - 1) * limit;
 
     const query = {};
     if (role) query.role = role;
     if (search) {
+      // Escape regex metacharacters to prevent ReDoS and user enumeration via crafted patterns
+      const safe = search.trim().slice(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
+        { name: { $regex: safe, $options: 'i' } },
+        { phone: { $regex: safe, $options: 'i' } },
+        { email: { $regex: safe, $options: 'i' } },
       ];
     }
 
     const users = await User.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .select('-password')
       .lean();
 
@@ -34,7 +38,7 @@ exports.getUsers = async (req, res) => {
     res.status(200).json({
       success: true,
       data: users,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error(err);
@@ -45,8 +49,10 @@ exports.getUsers = async (req, res) => {
 // ─── GET /api/admin/artisans — List artisans with verification status filter ──
 exports.getArtisans = async (req, res) => {
   try {
-    const { status, page = 1, limit = 30 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { status } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip  = (page - 1) * limit;
 
     const query = {};
     if (status) query.verificationStatus = status;
@@ -55,7 +61,7 @@ exports.getArtisans = async (req, res) => {
       .populate('userId', 'name phone email createdAt isActive')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     const total = await ArtisanProfile.countDocuments(query);
@@ -294,8 +300,10 @@ exports.banArtisan = async (req, res) => {
 // ─── GET /api/admin/jobs — View all jobs ─────────────────────────────────────
 exports.getJobs = async (req, res) => {
   try {
-    const { status, page = 1, limit = 30 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { status } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip  = (page - 1) * limit;
 
     const query = {};
     if (status) query.status = status;
@@ -305,7 +313,7 @@ exports.getJobs = async (req, res) => {
       .populate('assignedArtisanId', 'name phone')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     const total = await Job.countDocuments(query);
@@ -313,7 +321,7 @@ exports.getJobs = async (req, res) => {
     res.status(200).json({
       success: true,
       data: jobs,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error(err);
@@ -324,8 +332,10 @@ exports.getJobs = async (req, res) => {
 // ─── GET /api/admin/complaints — View all complaints ─────────────────────────
 exports.getComplaints = async (req, res) => {
   try {
-    const { status, page = 1, limit = 30 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { status } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip  = (page - 1) * limit;
 
     const query = {};
     if (status) query.status = status;
@@ -336,7 +346,7 @@ exports.getComplaints = async (req, res) => {
       .populate('jobId', 'category status createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     const total = await Complaint.countDocuments(query);
@@ -344,7 +354,7 @@ exports.getComplaints = async (req, res) => {
     res.status(200).json({
       success: true,
       data: complaints,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error(err);
@@ -432,8 +442,10 @@ exports.resolveDispute = async (req, res) => {
 // Distinct from /api/admin/users so it can include artisan isPro info
 exports.listUsers = async (req, res) => {
   try {
-    const { role, page = 1, limit = 50, isPro } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { role, isPro } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip  = (page - 1) * limit;
 
     const userQuery = {};
     if (role === 'customer') userQuery.role = 'customer';
@@ -480,7 +492,7 @@ exports.listUsers = async (req, res) => {
     res.status(200).json({
       success: true,
       data: result,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error('listUsers error:', err);

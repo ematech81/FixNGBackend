@@ -132,5 +132,7 @@ JobSchema.index({ location: '2dsphere' });
 JobSchema.index({ status: 1, createdAt: -1 });
 JobSchema.index({ customerId: 1, status: 1 });
 JobSchema.index({ assignedArtisanId: 1, status: 1 });
+// Compound index for subscriptionTick expiry scan
+JobSchema.index({ status: 1, expiresAt: 1 });
 
 module.exports = mongoose.model('Job', JobSchema);

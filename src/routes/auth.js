@@ -11,6 +11,22 @@ const otpLimiter = rateLimit({
   message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
 });
 
+const checkDeviceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
 const {
   register,
   login,
@@ -27,7 +43,7 @@ const { protect } = require('../middleware/auth');
 
 // ── Phone OTP flow ─────────────────────────────────────────────────────────────
 // Step 0: check if device is trusted — may skip OTP entirely
-router.post('/check-device', checkDevice);
+router.post('/check-device', checkDeviceLimiter, checkDevice);
 
 // Step 1: send OTP (for both register and login)
 router.post('/otp/send', otpLimiter, sendOTPHandler);
@@ -53,7 +69,7 @@ router.post(
   register
 );
 
-router.post('/login', login);
+router.post('/login', loginLimiter, login);
 
 // ── Account upgrades ──────────────────────────────────────────────────────────
 // Customer → Artisan (creates ArtisanProfile, upgrades role)

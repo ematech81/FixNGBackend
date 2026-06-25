@@ -19,17 +19,13 @@ const User = require('../models/User');
 // Query params: category, latitude, longitude, maxDistance (km), minRating, page
 exports.searchArtisans = async (req, res) => {
   try {
-    const {
-      category,
-      latitude,
-      longitude,
-      maxDistance = 20, // km default
-      minRating = 0,
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const { category, latitude, longitude } = req.query;
+    const minRating  = parseFloat(req.query.minRating) || 0;
+    const page       = Math.max(1, parseInt(req.query.page)        || 1);
+    const limit      = Math.min(50,  Math.max(1, parseInt(req.query.limit)       || 20));
+    const maxDistance = Math.min(200, Math.max(1, parseFloat(req.query.maxDistance) || 20));
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (page - 1) * limit;
 
     // Build geo query if coordinates provided
     const query = {
@@ -181,14 +177,15 @@ exports.getArtisanProfile = async (req, res) => {
 exports.getArtisanReviews = async (req, res) => {
   try {
     const { artisanId } = req.params;
-    const { page = 1, limit = 10 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    const skip  = (page - 1) * limit;
 
     const reviews = await Review.find({ artisanId })
       .populate('customerId', 'name')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     const total = await Review.countDocuments({ artisanId });
@@ -203,7 +200,7 @@ exports.getArtisanReviews = async (req, res) => {
         comment: r.comment,
         createdAt: r.createdAt,
       })),
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error('getArtisanReviews error:', err);
@@ -267,19 +264,53 @@ exports.rateJob = async (req, res) => {
     });
 
     // ── Non-critical: update artisan stats ────────────────────────────────────
-    // Wrapped separately so a save() failure never blocks the review response.
+    // Single atomic pipeline update — eliminates the read-modify-write race condition
+    // that corrupts averageRating when two reviews submit simultaneously.
+    // Badge level is recomputed inline since pre-save hook doesn't run on findOneAndUpdate.
     try {
-      const artisanProfile = await ArtisanProfile.findOne({ userId: job.assignedArtisanId });
-      if (artisanProfile) {
-        const prevTotal = artisanProfile.stats.totalRatings;
-        const prevAvg   = artisanProfile.stats.averageRating;
-        const newTotal  = prevTotal + 1;
-        const newAvg    = (prevAvg * prevTotal + overallScore) / newTotal;
-
-        artisanProfile.stats.averageRating = Math.round(newAvg * 100) / 100;
-        artisanProfile.stats.totalRatings  = newTotal;
-        await artisanProfile.save(); // triggers badge recomputation via pre-save hook
-      }
+      await ArtisanProfile.findOneAndUpdate(
+        { userId: job.assignedArtisanId },
+        [
+          {
+            $set: {
+              'stats.averageRating': {
+                $round: [
+                  {
+                    $divide: [
+                      {
+                        $add: [
+                          { $multiply: [{ $ifNull: ['$stats.averageRating', 0] }, { $ifNull: ['$stats.totalRatings', 0] }] },
+                          overallScore,
+                        ],
+                      },
+                      { $add: [{ $ifNull: ['$stats.totalRatings', 0] }, 1] },
+                    ],
+                  },
+                  2,
+                ],
+              },
+              'stats.totalRatings': { $add: [{ $ifNull: ['$stats.totalRatings', 0] }, 1] },
+            },
+          },
+          {
+            $set: {
+              badgeLevel: {
+                $cond: [
+                  { $ne: ['$verificationStatus', 'verified'] },
+                  'new',
+                  {
+                    $cond: [
+                      { $and: [{ $gte: ['$stats.completedJobs', 10] }, { $gte: ['$stats.averageRating', 3.5] }] },
+                      'trusted',
+                      'verified',
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ]
+      );
     } catch (statsErr) {
       console.error('rateJob: artisan stats update failed (non-fatal):', statsErr.message);
     }

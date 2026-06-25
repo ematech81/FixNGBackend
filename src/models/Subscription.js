@@ -54,4 +54,8 @@ subscriptionSchema.virtual('daysRemaining').get(function () {
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 });
 
+// Compound indexes for subscriptionTick hourly queries — avoids full-collection scans
+subscriptionSchema.index({ status: 1, endsAt: 1 });      // active → grace
+subscriptionSchema.index({ status: 1, graceEndsAt: 1 }); // grace → expired
+
 module.exports = mongoose.model('Subscription', subscriptionSchema);

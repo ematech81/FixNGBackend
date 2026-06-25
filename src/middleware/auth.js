@@ -69,7 +69,7 @@ exports.requireActiveSubscription = async (req, res, next) => {
   }
 };
 
-// Block artisan from receiving jobs if not verified
+// Block artisan from receiving jobs if not verified, suspended, or banned
 exports.requireVerified = async (req, res, next) => {
   try {
     const ArtisanProfile = require('../models/ArtisanProfile');
@@ -81,6 +81,22 @@ exports.requireVerified = async (req, res, next) => {
         message: 'Your account must be verified before you can receive or accept jobs.',
         verificationStatus: profile ? profile.verificationStatus : 'incomplete',
         onboardingComplete: profile ? profile.onboardingComplete : false,
+      });
+    }
+
+    if (profile.isBanned) {
+      return res.status(403).json({
+        success: false,
+        isBanned: true,
+        message: 'Your account has been banned from FixNG.',
+      });
+    }
+
+    if (profile.isSuspended) {
+      return res.status(403).json({
+        success: false,
+        isSuspended: true,
+        message: 'Your account is currently suspended. Contact support to appeal.',
       });
     }
 

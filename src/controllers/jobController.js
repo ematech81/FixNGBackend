@@ -348,11 +348,8 @@ exports.declineJob = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Job is no longer available.' });
     }
 
-    // Mark as declined — this artisan won't see it again
-    if (!job.declinedBy.includes(req.user._id)) {
-      job.declinedBy.push(req.user._id);
-      await job.save();
-    }
+    // Atomic add-to-set — safe under concurrent requests (no duplicate ids, no overwrite)
+    await Job.findByIdAndUpdate(jobId, { $addToSet: { declinedBy: req.user._id } });
 
     // Notify customer only on direct requests (assignedArtisanId was set at creation)
     const wasDirectRequest = job.assignedArtisanId?.toString() === req.user._id.toString();
@@ -522,17 +519,26 @@ exports.raiseDispute = async (req, res) => {
     const raisedBy = isCustomer ? 'customer' : 'artisan';
     const prevStatus = job.status;
 
-    job.status = 'disputed';
-    job.dispute = {
-      raisedBy,
-      reason: reason.trim(),
-      resolution: null,
-      resolvedAt: null,
-      resolvedBy: null,
-    };
-    job.timeline.disputedAt = new Date();
+    // Atomic status update — prevents two simultaneous disputes creating duplicate Complaints
+    const updated = await Job.findOneAndUpdate(
+      { _id: req.params.jobId, status: { $in: ['accepted', 'in-progress', 'completed'] } },
+      {
+        $set: {
+          status: 'disputed',
+          'dispute.raisedBy': raisedBy,
+          'dispute.reason': reason.trim(),
+          'dispute.resolution': null,
+          'dispute.resolvedAt': null,
+          'dispute.resolvedBy': null,
+          'timeline.disputedAt': new Date(),
+        },
+      },
+      { new: true }
+    );
 
-    await job.save();
+    if (!updated) {
+      return res.status(409).json({ success: false, message: 'A dispute is already open or job status changed.' });
+    }
 
     // Create a Complaint record so the dispute appears in the admin dashboard
     const againstUserId = isCustomer ? job.assignedArtisanId : job.customerId;
@@ -609,11 +615,23 @@ exports.cancelJob = async (req, res) => {
 
     const cancelledBy = isCustomer ? 'customer' : 'artisan';
 
-    job.status = 'cancelled';
-    job.timeline.cancelledAt = new Date();
-    job.cancellation = { cancelledBy, reason: reason?.trim() || null };
+    // Atomic status update — prevents double-cancel if two requests race
+    const updated = await Job.findOneAndUpdate(
+      { _id: req.params.jobId, status: { $in: ['pending', 'accepted'] } },
+      {
+        $set: {
+          status: 'cancelled',
+          'timeline.cancelledAt': new Date(),
+          'cancellation.cancelledBy': cancelledBy,
+          'cancellation.reason': reason?.trim() || null,
+        },
+      },
+      { new: true }
+    );
 
-    await job.save();
+    if (!updated) {
+      return res.status(409).json({ success: false, message: 'Job was already cancelled.' });
+    }
 
     if (isArtisan) {
       await ArtisanProfile.findOneAndUpdate(
@@ -687,8 +705,10 @@ exports.getJob = async (req, res) => {
 // ─── GET /api/jobs/my — Customer or artisan sees their own jobs ────────────────
 exports.getMyJobs = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { status } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip  = (page - 1) * limit;
 
     const query =
       req.user.role === 'customer'
@@ -700,7 +720,7 @@ exports.getMyJobs = async (req, res) => {
     const jobs = await Job.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .populate('customerId', 'name')
       .populate('assignedArtisanId', 'name')
       .select('-notifiedArtisans -declinedBy')
@@ -711,7 +731,7 @@ exports.getMyJobs = async (req, res) => {
     res.status(200).json({
       success: true,
       data: jobs,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error(err);
