@@ -4,11 +4,12 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 30 * 60 * 1000, // 30 minutes
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+  keyGenerator: (req) => req.body?.phone || req.ip || 'unknown',
+  message: { success: false, message: 'Too many OTP requests. Please wait 30 minutes and try again.' },
 });
 
 const checkDeviceLimiter = rateLimit({

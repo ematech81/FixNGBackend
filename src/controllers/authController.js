@@ -92,15 +92,18 @@ exports.checkDevice = async (req, res) => {
       return await buildAuthResponse(user, 200, res);
     }
 
-    // Unknown device — send OTP
-    const { sendOTP } = require('../services/smsService');
-    await sendOTP(normalized);
+    // Unknown device — send OTP (with email fallback using stored user email)
+    const { sendOTP: _sendOTP } = require('../services/smsService');
+    const otpResult = await _sendOTP(normalized, user?.email || null);
 
     return res.status(200).json({
-      success: true,
+      success:  true,
       needsOTP: true,
       isNewUser: false,
-      phone: normalized,
+      phone:    normalized,
+      hasEmail:  !!user?.email,
+      emailUsed: otpResult.emailUsed,
+      ...(otpResult.maskedEmail ? { maskedEmail: otpResult.maskedEmail } : {}),
     });
   } catch (err) {
     console.error('checkDevice error:', err);
@@ -113,28 +116,42 @@ exports.checkDevice = async (req, res) => {
 
 // ─── POST /api/auth/otp/send ──────────────────────────────────────────────────
 // Step 1 of phone auth (both register and login).
-// Body: { phone }
+// Body: { phone, email?, forceEmail? }
 exports.sendOTPHandler = async (req, res) => {
-  const { phone } = req.body;
+  const { phone, email: rawEmail, forceEmail } = req.body;
 
   if (!phone?.trim()) {
     return res.status(400).json({ success: false, message: 'Phone number is required.' });
   }
 
   try {
-    const { normalized } = await sendOTP(phone.trim());
+    const normalized = phone.trim();
+
+    // Resolve email: use request body value, or — when forceEmail and no email provided
+    // — look up the existing user's stored email (login flow with no email field on screen)
+    let resolvedEmail = rawEmail?.trim()?.toLowerCase() || null;
+    if (!resolvedEmail && forceEmail) {
+      const { normalizePhone } = require('../services/smsService');
+      const existing = await User.findOne({ phone: normalizePhone(normalized) }).select('email').lean();
+      resolvedEmail = existing?.email || null;
+    }
+
+    const result = await sendOTP(normalized, resolvedEmail, !!forceEmail);
 
     res.status(200).json({
       success: true,
-      message: 'Your access key has been sent. It may take up to 2 minutes to arrive.',
-      phone: normalized,
+      message: result.emailUsed
+        ? 'Your access key has been sent to your email.'
+        : 'Your access key has been sent. It may take up to 2 minutes to arrive.',
+      phone: result.normalized,
+      emailUsed: result.emailUsed,
+      ...(result.maskedEmail ? { maskedEmail: result.maskedEmail } : {}),
     });
   } catch (err) {
     console.error('sendOTP error:', err);
-    // Twilio errors have a specific shape
     const msg = err?.message?.includes('is not a valid phone number')
       ? 'Enter a valid Nigerian phone number.'
-      : 'Failed to send OTP. Please try again.';
+      : err?.message || 'Failed to send OTP. Please try again.';
     res.status(500).json({ success: false, message: msg });
   }
 };
@@ -173,6 +190,19 @@ exports.verifyRegister = async (req, res) => {
       }
     }
 
+    // Validate and resolve email
+    const { email: rawEmail } = req.body;
+    const email = rawEmail?.trim()?.toLowerCase() || null;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Invalid email address format.' });
+    }
+    if (email) {
+      const emailTaken = await User.findOne({ email }).lean();
+      if (emailTaken) {
+        return res.status(400).json({ success: false, message: 'This email is already registered to another account.' });
+      }
+    }
+
     // Check if phone is already registered
     const existing = await User.findOne({ phone: result.normalized });
     if (existing) {
@@ -190,10 +220,11 @@ exports.verifyRegister = async (req, res) => {
     }
 
     const user = await User.create({
-      name: name.trim(),
-      phone: result.normalized,
+      name:            name.trim(),
+      phone:           result.normalized,
+      email:           email || null,
       role,
-      authMethod: 'phone',
+      authMethod:      'phone',
       isPhoneVerified: true,
     });
 
