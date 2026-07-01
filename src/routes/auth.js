@@ -1,6 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const router = express.Router();
 
 const otpLimiter = rateLimit({
@@ -8,7 +9,7 @@ const otpLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.body?.phone || req.ip || 'unknown',
+  keyGenerator: (req) => req.body?.phone || ipKeyGenerator(req),
   message: { success: false, message: 'Too many OTP requests. Please wait 30 minutes and try again.' },
 });
 
