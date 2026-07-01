@@ -94,6 +94,63 @@ exports.getArtisans = async (req, res) => {
   }
 };
 
+// ─── POST /api/admin/artisans/search — Search artisans by code, name, or phone ─
+exports.searchArtisans = async (req, res) => {
+  try {
+    const q = req.body?.q?.trim();
+    if (!q) {
+      return res.status(400).json({ success: false, message: 'Search query is required.' });
+    }
+
+    const safe = q.slice(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const filter = { role: 'artisan' };
+
+    if (/^FNG-[A-Za-z0-9]{5}$/.test(q)) {
+      filter.artisanCode = q.toUpperCase();
+    } else {
+      filter.$or = [
+        { name: { $regex: safe, $options: 'i' } },
+        { phone: { $regex: safe, $options: 'i' } },
+      ];
+    }
+
+    const users = await User.find(filter)
+      .select('name phone email artisanCode isActive createdAt')
+      .limit(20)
+      .lean();
+
+    const userIds = users.map((u) => u._id);
+    const profiles = await ArtisanProfile.find({ userId: { $in: userIds } })
+      .select('userId verificationStatus badgeLevel isPro')
+      .lean();
+
+    const profileMap = {};
+    profiles.forEach((p) => { profileMap[p.userId.toString()] = p; });
+
+    const results = users.map((u) => ({
+      userId: u._id,
+      name: u.name,
+      phone: u.phone,
+      email: u.email || null,
+      artisanCode: u.artisanCode || null,
+      isActive: u.isActive,
+      memberSince: u.createdAt,
+      profile: profileMap[u._id.toString()]
+        ? {
+            verificationStatus: profileMap[u._id.toString()].verificationStatus,
+            badgeLevel: profileMap[u._id.toString()].badgeLevel,
+            isPro: profileMap[u._id.toString()].isPro,
+          }
+        : null,
+    }));
+
+    res.status(200).json({ success: true, data: results });
+  } catch (err) {
+    console.error('searchArtisans error:', err);
+    res.status(500).json({ success: false, message: 'Search failed.' });
+  }
+};
+
 // ─── GET /api/admin/artisans/:artisanUserId — Full artisan profile for admin ──
 exports.getArtisanDetail = async (req, res) => {
   try {

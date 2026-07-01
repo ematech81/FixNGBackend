@@ -86,9 +86,14 @@ exports.createJob = async (req, res) => {
       jobDoc.voiceDescription = voiceDescriptionDoc;
     }
 
-    // Direct request to a specific artisan — assign immediately
+    // Direct request to a specific artisan — assign immediately and stamp artisanCode
+    let _directArtisan = null;
     if (artisanId) {
       jobDoc.assignedArtisanId = artisanId;
+      _directArtisan = await User.findById(artisanId).select('name artisanCode').lean();
+      if (_directArtisan?.artisanCode) {
+        jobDoc.artisanCode = _directArtisan.artisanCode;
+      }
     }
 
     const job = await Job.create(jobDoc);
@@ -99,8 +104,7 @@ exports.createJob = async (req, res) => {
 
     if (artisanId) {
       // Direct request: notify only the chosen artisan
-      const targetUser = await User.findById(artisanId).select('name').lean();
-      targetArtisanName = targetUser?.name || null;
+      targetArtisanName = _directArtisan?.name || null;
       artisanUserIds = [artisanId];
       await Job.findByIdAndUpdate(job._id, { notifiedArtisans: artisanUserIds });
       emitToUser(artisanId.toString(), 'new_job', {
@@ -280,6 +284,7 @@ exports.acceptJob = async (req, res) => {
         $set: {
           status: 'accepted',
           assignedArtisanId: req.user._id,
+          artisanCode: req.user.artisanCode || null,
           estimatedArrivalMinutes: estimatedArrivalMinutes || null,
           agreedPrice: agreedPrice || null,
           'timeline.acceptedAt': new Date(),
@@ -293,7 +298,7 @@ exports.acceptJob = async (req, res) => {
     }
 
     // Notify customer
-    const artisan = await User.findById(req.user._id).select('name');
+    const artisan = await User.findById(req.user._id).select('name artisanCode');
     emitToUser(job.customerId.toString(), 'job_accepted', {
       jobId: job._id,
       artisanId: req.user._id,

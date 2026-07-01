@@ -113,6 +113,9 @@ const JobSchema = new mongoose.Schema(
       ratedAt: { type: Date, default: null },
     },
 
+    // ── Artisan ID snapshot — stamped when artisan accepts (or at job creation for direct requests)
+    artisanCode: { type: String, default: null },
+
     // ── Cancellation ──────────────────────────────────────────────────────────
     cancellation: {
       cancelledBy: { type: String, default: null },  // 'customer' | 'artisan' | 'admin' | null

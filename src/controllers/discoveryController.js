@@ -130,7 +130,7 @@ exports.getArtisanProfile = async (req, res) => {
     const { artisanId } = req.params;
 
     const profile = await ArtisanProfile.findOne({ userId: artisanId })
-      .populate('userId', 'name createdAt')
+      .populate('userId', 'name createdAt artisanCode')
       .lean();
 
     if (!profile || profile.verificationStatus !== 'verified') {
@@ -152,6 +152,7 @@ exports.getArtisanProfile = async (req, res) => {
       data: {
         id: profile.userId._id,
         name: profile.userId.name,
+        artisanCode: profile.userId.artisanCode || null,
         memberSince: profile.userId.createdAt,
         profilePhoto: profile.profilePhoto?.url || null,
         skills: profile.skills,

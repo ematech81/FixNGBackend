@@ -3,6 +3,7 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const ArtisanProfile = require('../models/ArtisanProfile');
 const { sendOTP, verifyOTP, normalizePhone } = require('../services/smsService');
+const { generateArtisanCode } = require('../utils/generateArtisanCode');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -231,6 +232,14 @@ exports.verifyRegister = async (req, res) => {
     if (role === 'artisan') {
       try {
         await ArtisanProfile.create({ userId: user._id });
+        // Assign a unique human-readable ID (non-fatal — artisan can still use the app without it)
+        try {
+          const code = await generateArtisanCode(User);
+          await User.findByIdAndUpdate(user._id, { artisanCode: code });
+          user.artisanCode = code;
+        } catch (codeErr) {
+          console.warn('[artisanCode] non-fatal on register:', codeErr.message);
+        }
         // Start 7-day free trial for every new artisan (non-fatal if it fails)
         require('../helpers/subscriptionHelper').startTrial(user._id).catch(
           (e) => console.warn('[startTrial] non-fatal on register:', e.message)
@@ -393,7 +402,15 @@ exports.becomeArtisan = async (req, res) => {
       { upsert: true, new: true }
     );
     if (isNew) {
-      await User.findByIdAndUpdate(userId, { role: 'artisan' });
+      const codeUpdates = { role: 'artisan' };
+      // Assign artisan code if the user doesn't have one yet
+      try {
+        const code = await generateArtisanCode(User);
+        codeUpdates.artisanCode = code;
+      } catch (codeErr) {
+        console.warn('[artisanCode] non-fatal on becomeArtisan:', codeErr.message);
+      }
+      await User.findByIdAndUpdate(userId, codeUpdates);
       // Start 7-day free trial (non-fatal if it fails)
       require('../helpers/subscriptionHelper').startTrial(userId).catch(
         (e) => console.warn('[startTrial] non-fatal on becomeArtisan:', e.message)
@@ -534,6 +551,7 @@ exports.getMe = async (req, res) => {
         phone: user.phone,
         role: user.role,
         authMethod: user.authMethod,
+        artisanCode: user.artisanCode || null,
       },
       artisanProfile,
     });

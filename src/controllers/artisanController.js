@@ -40,6 +40,7 @@ exports.getOnboardingStatus = async (req, res) => {
         completedSteps: profile.completedSteps,
         skippedSteps: profile.skippedSteps,
         rejectionReason: profile.rejectionReason,
+        artisanCode: req.user.artisanCode || null,
         // Return partial data so frontend can show what's already uploaded
         profilePhoto: profile.profilePhoto?.url || null,
         skills: profile.skills,

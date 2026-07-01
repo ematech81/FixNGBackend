@@ -6,6 +6,7 @@ const {
   listUsers,
   toggleUserActive,
   getArtisans,
+  searchArtisans,
   getArtisanDetail,
   verifyArtisan,
   rejectArtisan,
@@ -38,6 +39,7 @@ router.post('/users/:userId/toggle-active', toggleUserActive);
 
 // Artisans
 router.get('/artisans', getArtisans);
+router.post('/artisans/search', searchArtisans);
 router.get('/artisans/:artisanUserId', getArtisanDetail);
 router.post('/artisans/:artisanUserId/verify', verifyArtisan);
 router.post('/artisans/:artisanUserId/reject', rejectArtisan);

@@ -70,6 +70,13 @@ const UserSchema = new mongoose.Schema(
     warningCount:     { type: Number, default: 0 },
     isSuspended:      { type: Boolean, default: false },
     suspensionReason: { type: String, default: null },
+
+    // ── Artisan ID — assigned once on artisan registration, never changes ─────
+    artisanCode: {
+      type: String,
+      default: null,
+      uppercase: true,
+    },
   },
   { timestamps: true }
 );
@@ -77,6 +84,8 @@ const UserSchema = new mongoose.Schema(
 UserSchema.index({ isActive: 1 });
 // Sparse index allows fast lookup by email while tolerating null values (phone-only users)
 UserSchema.index({ email: 1 }, { sparse: true });
+// Sparse unique index — only artisan users have a code; null is excluded from uniqueness check
+UserSchema.index({ artisanCode: 1 }, { sparse: true, unique: true });
 // Device ban lookup — checked on every login for non-admin users
 UserSchema.index({ 'knownDevices.deviceId': 1 });
 
