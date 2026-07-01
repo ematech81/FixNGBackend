@@ -5,7 +5,6 @@ const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
-const { sendPushNotification } = require('../utils/sendPushNotification');
 
 // ─── GET /api/admin/users — List all users with filters ──────────────────────
 exports.getUsers = async (req, res) => {
@@ -190,26 +189,6 @@ exports.verifyArtisan = async (req, res) => {
       {}
     );
 
-    // Push notification — fire-and-forget
-    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
-    if (artisanUser?.expoPushToken) {
-      sendPushNotification(artisanUser.expoPushToken, {
-        title: '🎉 You\'re Verified!',
-        body: 'Your FixNG profile has been verified. You can now accept jobs.',
-        data: { type: 'profile_verified' },
-      });
-
-      // If the pre-save hook upgraded the badge to 'trusted', notify about the badge too
-      if (profile.badgeLevel === 'trusted') {
-        const badgeLabels = { pro: 'Pro Artisan ⭐', trusted: 'Trusted Artisan 🏆' };
-        sendPushNotification(artisanUser.expoPushToken, {
-          title: `Badge Upgraded: ${badgeLabels[profile.badgeLevel] || profile.badgeLevel}`,
-          body: 'Your FixNG badge has been upgraded. Customers can now find you more easily.',
-          data: { type: 'profile_verified' },
-        });
-      }
-    }
-
     res.status(200).json({ success: true, message: 'Artisan verified.' });
   } catch (err) {
     console.error(err);
@@ -279,16 +258,6 @@ exports.warnArtisan = async (req, res) => {
       {}
     );
 
-    // Push notification — fire-and-forget
-    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
-    if (artisanUser?.expoPushToken) {
-      sendPushNotification(artisanUser.expoPushToken, {
-        title: '⚠️ Account Warning',
-        body: reason.trim() || 'You have received a warning on your account.',
-        data: { type: 'account_warning' },
-      });
-    }
-
     res.status(200).json({
       success: true,
       message: 'Warning issued.',
@@ -326,16 +295,6 @@ exports.suspendArtisan = async (req, res) => {
       `Your account has been suspended. Reason: ${reason.trim()}`,
       {}
     );
-
-    // Push notification — fire-and-forget
-    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
-    if (artisanUser?.expoPushToken) {
-      sendPushNotification(artisanUser.expoPushToken, {
-        title: '🔒 Account Suspended',
-        body: reason.trim() || 'Your account has been suspended. Contact support for assistance.',
-        data: { type: 'account_suspended' },
-      });
-    }
 
     res.status(200).json({ success: true, message: 'Artisan suspended.' });
   } catch (err) {
@@ -652,7 +611,7 @@ exports.grantPro = async (req, res) => {
 
     if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
 
-    notify(req.params.artisanUserId, 'profile_verified',
+    notify(req.params.artisanUserId, 'badge_upgraded',
       'You\'re now a Pro! ⭐',
       'Congratulations! You have been granted Pro status on FixNG. Your profile now appears first in search results.',
       {}
@@ -786,5 +745,42 @@ exports.getDashboardStats = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to fetch stats.' });
+  }
+};
+
+// ─── POST /api/admin/announce — Broadcast announcement to all users (or by role)
+exports.broadcastAnnouncement = async (req, res) => {
+  try {
+    const { title, body, targetRole } = req.body;
+
+    if (!title?.trim() || !body?.trim()) {
+      return res.status(400).json({ success: false, message: 'Title and body are required.' });
+    }
+
+    const validRoles = ['all', 'artisan', 'customer'];
+    const role = validRoles.includes(targetRole) ? targetRole : 'all';
+
+    const userQuery = role === 'all' ? {} : { role };
+    const users = await User.find(userQuery).select('_id').lean();
+
+    // Create a notification for every matched user — batch in chunks to avoid memory spikes
+    const CHUNK = 200;
+    for (let i = 0; i < users.length; i += CHUNK) {
+      const chunk = users.slice(i, i + CHUNK);
+      await Promise.all(
+        chunk.map((u) =>
+          notify(u._id, 'announcement', title.trim(), body.trim(), {})
+        )
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Announcement sent to ${users.length} user(s).`,
+      data: { count: users.length, targetRole: role },
+    });
+  } catch (err) {
+    console.error('broadcastAnnouncement error:', err);
+    res.status(500).json({ success: false, message: 'Failed to send announcement.' });
   }
 };

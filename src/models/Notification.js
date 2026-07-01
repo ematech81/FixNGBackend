@@ -27,25 +27,31 @@ const notificationSchema = new mongoose.Schema(
         // Account / system
         'profile_verified',
         'profile_rejected',
+        'badge_upgraded',    // artisan: admin granted pro/trusted status
         'account_warning',
         'account_suspended',
         'account_unsuspended',
+        // Admin broadcasts
+        'announcement',      // admin: platform-wide or role-targeted announcement
       ],
     },
     title: { type: String, required: true },
     body:  { type: String, required: true },
-    // Payload for deep-linking (navigation on tap)
     data: {
       jobId:      { type: String, default: null },
       senderId:   { type: String, default: null },
       senderName: { type: String, default: null },
     },
-    read: { type: Boolean, default: false, index: true },
+    read:      { type: Boolean, default: false, index: true },
+    // pinned = shows as a persistent home-screen banner until dismissed
+    pinned:    { type: Boolean, default: false, index: true },
+    // dismissed = user manually closed the banner; never show it again
+    dismissed: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-// Index for efficient per-user queries sorted by newest first
 notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, pinned: 1, dismissed: 1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

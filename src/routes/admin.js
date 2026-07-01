@@ -24,6 +24,7 @@ const {
   resolveComplaint,
   resolveDispute,
   getDashboardStats,
+  broadcastAnnouncement,
 } = require('../controllers/adminController');
 
 // All admin routes — admin role only
@@ -62,5 +63,8 @@ router.post('/jobs/:jobId/resolve-dispute', resolveDispute);
 // Complaints
 router.get('/complaints', getComplaints);
 router.post('/complaints/:complaintId/resolve', resolveComplaint);
+
+// Announcements
+router.post('/announce', broadcastAnnouncement);
 
 module.exports = router;

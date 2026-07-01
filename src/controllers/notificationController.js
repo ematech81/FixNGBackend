@@ -3,16 +3,21 @@ const User         = require('../models/User');
 const { emitToUser } = require('../socket');
 const { sendPush }   = require('../services/pushService');
 
+// Types that show as a persistent home-screen banner until dismissed
+const PINNED_TYPES = new Set([
+  'profile_verified',
+  'badge_upgraded',
+  'new_job',
+  'job_broadcast',
+  'announcement',
+]);
+
 // ─── Helper: create + emit + push a notification ──────────────────────────────
-// Single call from any controller:
-//   1. Saves to DB (notification history)
-//   2. Emits via socket (in-app real-time, if user is connected)
-//   3. Sends Expo push (device notification, if user has a token and is not connected)
 const notify = async (userId, type, title, body, data = {}) => {
   try {
-    const notif = await Notification.create({ userId, type, title, body, data });
+    const pinned = PINNED_TYPES.has(type);
+    const notif  = await Notification.create({ userId, type, title, body, data, pinned });
 
-    // Real-time in-app delivery
     emitToUser(userId.toString(), 'notification', {
       id:        notif._id,
       type:      notif.type,
@@ -20,11 +25,10 @@ const notify = async (userId, type, title, body, data = {}) => {
       body:      notif.body,
       data:      notif.data,
       read:      false,
+      pinned:    notif.pinned,
       createdAt: notif.createdAt,
     });
 
-    // Push notification (background / device-level)
-    // Fetch token without blocking — fire and forget
     User.findById(userId).select('expoPushToken').lean().then((user) => {
       if (user?.expoPushToken) {
         sendPush(user.expoPushToken, title, body, { type, ...data });
@@ -68,6 +72,39 @@ exports.getNotifications = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to fetch notifications.' });
+  }
+};
+
+// ─── GET /api/notifications/banners — Active home-screen banners ──────────────
+exports.getBanners = async (req, res) => {
+  try {
+    const banners = await Notification.find({
+      userId:    req.user._id,
+      pinned:    true,
+      dismissed: false,
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.status(200).json({ success: true, data: banners });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to fetch banners.' });
+  }
+};
+
+// ─── PATCH /api/notifications/:id/dismiss — Dismiss a banner permanently ──────
+exports.dismissBanner = async (req, res) => {
+  try {
+    await Notification.updateOne(
+      { _id: req.params.id, userId: req.user._id },
+      { dismissed: true, read: true }
+    );
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to dismiss banner.' });
   }
 };
 
