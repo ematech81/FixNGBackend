@@ -72,9 +72,10 @@ const UserSchema = new mongoose.Schema(
     suspensionReason: { type: String, default: null },
 
     // ── Artisan ID — assigned once on artisan registration, never changes ─────
+    // No `default: null` — the field must be absent (not null) in non-artisan
+    // documents so the sparse unique index ignores them correctly.
     artisanCode: {
       type: String,
-      default: null,
       uppercase: true,
     },
   },
