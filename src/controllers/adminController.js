@@ -5,6 +5,7 @@ const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
+const { sendPushNotification } = require('../utils/sendPushNotification');
 
 // ─── GET /api/admin/users — List all users with filters ──────────────────────
 exports.getUsers = async (req, res) => {
@@ -189,6 +190,26 @@ exports.verifyArtisan = async (req, res) => {
       {}
     );
 
+    // Push notification — fire-and-forget
+    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
+    if (artisanUser?.expoPushToken) {
+      sendPushNotification(artisanUser.expoPushToken, {
+        title: '🎉 You\'re Verified!',
+        body: 'Your FixNG profile has been verified. You can now accept jobs.',
+        data: { type: 'profile_verified' },
+      });
+
+      // If the pre-save hook upgraded the badge to 'trusted', notify about the badge too
+      if (profile.badgeLevel === 'trusted') {
+        const badgeLabels = { pro: 'Pro Artisan ⭐', trusted: 'Trusted Artisan 🏆' };
+        sendPushNotification(artisanUser.expoPushToken, {
+          title: `Badge Upgraded: ${badgeLabels[profile.badgeLevel] || profile.badgeLevel}`,
+          body: 'Your FixNG badge has been upgraded. Customers can now find you more easily.',
+          data: { type: 'profile_verified' },
+        });
+      }
+    }
+
     res.status(200).json({ success: true, message: 'Artisan verified.' });
   } catch (err) {
     console.error(err);
@@ -258,6 +279,16 @@ exports.warnArtisan = async (req, res) => {
       {}
     );
 
+    // Push notification — fire-and-forget
+    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
+    if (artisanUser?.expoPushToken) {
+      sendPushNotification(artisanUser.expoPushToken, {
+        title: '⚠️ Account Warning',
+        body: reason.trim() || 'You have received a warning on your account.',
+        data: { type: 'account_warning' },
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Warning issued.',
@@ -267,7 +298,7 @@ exports.warnArtisan = async (req, res) => {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to warn artisan.' });
   }
-}; 
+};
  
 // ─── POST /api/admin/artisans/:artisanUserId/suspend ──────────────────────────
 exports.suspendArtisan = async (req, res) => {
@@ -295,6 +326,16 @@ exports.suspendArtisan = async (req, res) => {
       `Your account has been suspended. Reason: ${reason.trim()}`,
       {}
     );
+
+    // Push notification — fire-and-forget
+    const artisanUser = await User.findById(req.params.artisanUserId).select('expoPushToken');
+    if (artisanUser?.expoPushToken) {
+      sendPushNotification(artisanUser.expoPushToken, {
+        title: '🔒 Account Suspended',
+        body: reason.trim() || 'Your account has been suspended. Contact support for assistance.',
+        data: { type: 'account_suspended' },
+      });
+    }
 
     res.status(200).json({ success: true, message: 'Artisan suspended.' });
   } catch (err) {
