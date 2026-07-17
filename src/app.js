@@ -3,6 +3,7 @@ require('./config/env');   // fail-fast validation of Kora Pay env vars
 
 const http    = require('http');
 const express = require('express');
+const cors    = require('cors');
 const connectDB   = require('./config/db');
 const { initSocket } = require('./socket');
 
@@ -12,6 +13,22 @@ const server = http.createServer(app);
 // Trust Railway's reverse proxy so express-rate-limit can read the real
 // client IP from X-Forwarded-For instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 app.set('trust proxy', 1);
+
+// ── CORS — allow web clients (Vercel + local dev) ─────────────────────────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://fixng.vercel.app',
+  ...(process.env.WEB_ORIGIN ? [process.env.WEB_ORIGIN] : []),
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    // allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 
 // Connect to MongoDB
 connectDB();
