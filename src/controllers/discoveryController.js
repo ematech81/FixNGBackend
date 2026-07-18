@@ -108,6 +108,7 @@ exports.searchArtisans = async (req, res) => {
         bio: p.bio,
         address: p.location?.address || null,
         state: p.location?.state || null,
+        lga: p.location?.lga || null,
         badgeLevel: p.badgeLevel,
         isPro: p.isPro || false,
         distanceKm,

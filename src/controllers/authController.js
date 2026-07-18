@@ -417,9 +417,13 @@ exports.becomeArtisan = async (req, res) => {
       );
     }
 
+    const jwt = require('jsonwebtoken');
+    const newToken = jwt.sign({ id: userId, role: 'artisan' }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
     res.status(200).json({
       success: true,
       message: 'Artisan profile created. Complete onboarding to start receiving jobs.',
+      token: newToken,
       artisanProfile: {
         verificationStatus: profile.verificationStatus,
         onboardingComplete: profile.onboardingComplete,
