@@ -27,9 +27,8 @@ exports.searchArtisans = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // Build geo query if coordinates provided
+    // Build query — show all active artisans; verified ones rank first
     const query = {
-      verificationStatus: 'verified',
       isSuspended: { $ne: true },
       isBanned: { $ne: true },
     };
@@ -72,13 +71,17 @@ exports.searchArtisans = async (req, res) => {
         .limit(fetchLimit)
         .lean();
 
-      // Sort: Pro first, then by distance (preserved from $near order)
-      raw.sort((a, b) => (b.isPro ? 1 : 0) - (a.isPro ? 1 : 0));
+      // Sort: verified + pro first, then by distance
+      raw.sort((a, b) => {
+        const scoreA = (a.isPro ? 2 : 0) + (a.verificationStatus === 'verified' ? 1 : 0);
+        const scoreB = (b.isPro ? 2 : 0) + (b.verificationStatus === 'verified' ? 1 : 0);
+        return scoreB - scoreA;
+      });
       profiles = raw.slice(skip, skip + parseInt(limit));
     } else {
       // No location — Pro first, then by rating desc
       profiles = await ArtisanProfile.find(query)
-        .sort({ isPro: -1, 'stats.averageRating': -1, 'stats.completedJobs': -1 })
+        .sort({ isPro: -1, verificationStatus: -1, 'stats.averageRating': -1, 'stats.completedJobs': -1 })
         .populate('userId', 'name')
         .select('userId profilePhoto skills bio location stats badgeLevel isPro proSource')
         .skip(skip)

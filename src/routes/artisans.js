@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, restrictTo } = require('../middleware/auth');
+const { protect, optionalProtect, restrictTo } = require('../middleware/auth');
 const {
   searchArtisans,
   getArtisanProfile,
@@ -9,10 +9,10 @@ const {
   createComplaint,
 } = require('../controllers/discoveryController');
 
-// Public artisan discovery — any authenticated user can search
-router.get('/', protect, searchArtisans);
-router.get('/:artisanId', protect, getArtisanProfile);
-router.get('/:artisanId/reviews', protect, getArtisanReviews);
+// Artisan discovery — public routes, auth optional (enhances results if logged in)
+router.get('/', optionalProtect, searchArtisans);
+router.get('/:artisanId', optionalProtect, getArtisanProfile);
+router.get('/:artisanId/reviews', optionalProtect, getArtisanReviews);
 
 // Rate a job (customer only — route kept here for discovery context)
 router.post('/jobs/:jobId/rate', protect, restrictTo('customer'), rateJob);

@@ -31,6 +31,24 @@ exports.protect = async (req, res, next) => {
   }
 };
 
+// Optional auth — attaches user if token present, but does NOT reject unauthenticated requests.
+// Use on public routes that work for everyone but can personalise for logged-in users.
+exports.optionalProtect = async (req, res, next) => {
+  try {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) {
+      const token = header.split(' ')[1];
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id).select('-password');
+      if (user && user.isActive) req.user = user;
+    }
+  } catch {
+    // Invalid / expired token — just continue without req.user
+  }
+  next();
+};
+
 // Restrict access by role
 exports.restrictTo = (...roles) => {
   return (req, res, next) => {
