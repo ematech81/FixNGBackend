@@ -12,9 +12,9 @@ const maskEmail = (email) => {
 const sendOtpEmail = async (email, otp) => {
   const apiKey   = process.env.BREVO_API_KEY;
   // Use a real sending address, not noreply — spam filters penalise noreply senders
-  const fromAddr = process.env.BREVO_FROM_EMAIL || 'hello@fixng.app';
+  const fromAddr = process.env.BREVO_FROM_EMAIL || 'nwankwolivinu95@gmail.com';
   const fromName = process.env.BREVO_FROM_NAME  || 'FixNG';
-  const replyTo  = process.env.BREVO_REPLY_TO   || 'support@fixng.app';
+  const replyTo  = process.env.BREVO_REPLY_TO   || 'nwankwolivinu95@gmail.com';
   const expiry   = parseInt(process.env.OTP_EXPIRES_MINUTES) || 10;
 
   if (!apiKey) {
