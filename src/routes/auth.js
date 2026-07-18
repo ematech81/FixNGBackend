@@ -4,13 +4,24 @@ const rateLimit = require('express-rate-limit');
 const { ipKeyGenerator } = require('express-rate-limit');
 const router = express.Router();
 
-const otpLimiter = rateLimit({
-  windowMs: 30 * 60 * 1000, // 30 minutes
-  max: 5,
+// Send OTP — keyed per phone number: 10 sends per 10 minutes
+const otpSendLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.body?.phone || ipKeyGenerator(req),
-  message: { success: false, message: 'Too many OTP requests. Please wait 30 minutes and try again.' },
+  message: { success: false, message: 'Too many code requests. Please wait 10 minutes and try again.' },
+});
+
+// Verify OTP — keyed per phone: 15 attempts per 15 minutes (separate from send quota)
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.body?.phone || ipKeyGenerator(req),
+  message: { success: false, message: 'Too many verification attempts. Please wait 15 minutes.' },
 });
 
 const checkDeviceLimiter = rateLimit({
@@ -23,7 +34,7 @@ const checkDeviceLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many login attempts. Please try again in 15 minutes.' },
@@ -48,13 +59,13 @@ const { protect } = require('../middleware/auth');
 router.post('/check-device', checkDeviceLimiter, checkDevice);
 
 // Step 1: send OTP (for both register and login)
-router.post('/otp/send', otpLimiter, sendOTPHandler);
+router.post('/otp/send', otpSendLimiter, sendOTPHandler);
 
 // Step 2a: verify OTP + create new account
-router.post('/otp/verify-register', otpLimiter, verifyRegister);
+router.post('/otp/verify-register', otpVerifyLimiter, verifyRegister);
 
 // Step 2b: verify OTP + log in existing account
-router.post('/otp/verify-login', otpLimiter, verifyLoginOTP);
+router.post('/otp/verify-login', otpVerifyLimiter, verifyLoginOTP);
 
 // ── Email / password flow (legacy / admin) ─────────────────────────────────────
 router.post(
