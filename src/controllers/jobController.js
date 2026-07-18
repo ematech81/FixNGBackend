@@ -27,7 +27,7 @@ const deleteJobImages = async (images = []) => {
 // ─── POST /api/jobs — Customer creates a job ─────────────────────────────────
 exports.createJob = async (req, res) => {
   try {
-    const { category, description, urgency, latitude, longitude, address, state, lga, artisanId } = req.body;
+    const { title, category, description, urgency, latitude, longitude, address, state, lga, artisanId } = req.body;
 
     // Validate required fields
     if (!category || !description) {
@@ -61,6 +61,7 @@ exports.createJob = async (req, res) => {
 
     const jobDoc = {
       customerId: req.user._id,
+      title: title?.trim() || null,
       category,
       description,
       images,

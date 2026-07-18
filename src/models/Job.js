@@ -15,6 +15,11 @@ const JobSchema = new mongoose.Schema(
     },
 
     // ── Job Details ───────────────────────────────────────────────────────────
+    title: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     category: {
       type: String,
       required: true,
@@ -40,7 +45,7 @@ const JobSchema = new mongoose.Schema(
     },
     urgency: {
       type: String,
-      enum: ['normal', 'emergency', 'remote'],
+      enum: ['normal', 'emergency', 'remote', 'immediate', 'today', 'this_week', 'flexible', 'scheduled'],
       default: 'normal',
     },
 
@@ -49,11 +54,9 @@ const JobSchema = new mongoose.Schema(
       type: {
         type: String,
         enum: ['Point'],
-        default: 'Point',
       },
       coordinates: {
-        type: [Number], // [longitude, latitude]
-        required: true,
+        type: [Number], // [longitude, latitude] — optional; omitted when customer has no GPS
       },
       address: { type: String, default: null },
       state: { type: String, default: null },
