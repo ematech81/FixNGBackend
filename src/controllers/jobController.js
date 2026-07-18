@@ -34,16 +34,9 @@ exports.createJob = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Category and description are required.' });
     }
 
-    if (!latitude || !longitude) {
-      return res.status(400).json({ success: false, message: 'Job location coordinates are required.' });
-    }
-
-    const lat = parseFloat(latitude);
-    const lng = parseFloat(longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({ success: false, message: 'Invalid coordinates.' });
-    }
+    const lat = latitude  ? parseFloat(latitude)  : null;
+    const lng = longitude ? parseFloat(longitude) : null;
+    const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
 
     // Build images array from uploaded files
     // req.files is an object when using multer.fields(): { images: [...], voiceDescription: [...] }
@@ -73,8 +66,7 @@ exports.createJob = async (req, res) => {
       images,
       urgency: urgency || 'normal',
       location: {
-        type: 'Point',
-        coordinates: [lng, lat],
+        ...(hasCoords ? { type: 'Point', coordinates: [lng, lat] } : {}),
         address: address || null,
         state: state || null,
         lga: lga || null,
@@ -131,7 +123,7 @@ exports.createJob = async (req, res) => {
           verificationStatus: 'verified',
           skills: category,
         }).select('userId').lean();
-      } else {
+      } else if (hasCoords) {
         const radius = urgency === 'emergency' ? EMERGENCY_JOB_RADIUS_METERS : NORMAL_JOB_RADIUS_METERS;
         nearbyProfiles = await ArtisanProfile.find({
           verificationStatus: 'verified',
@@ -142,6 +134,14 @@ exports.createJob = async (req, res) => {
               $maxDistance: radius,
             },
           },
+        }).select('userId').lean();
+      } else {
+        // No GPS — notify verified artisans in the same state (or all if state unknown)
+        const stateFilter = state ? { 'location.state': state } : {};
+        nearbyProfiles = await ArtisanProfile.find({
+          verificationStatus: 'verified',
+          skills: category,
+          ...stateFilter,
         }).select('userId').lean();
       }
 
