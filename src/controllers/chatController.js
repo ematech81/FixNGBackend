@@ -62,29 +62,7 @@ exports.getConversations = async (req, res) => {
   }
 };
 
-// Phone number patterns to mask (Nigerian numbers + common formats)
-// We replace matched numbers with [phone hidden] to keep users in-app
-const PHONE_PATTERNS = [
-  /(\+?234[\s\-.]?)?0?[7-9][0-1]\d{8}/g,          // Nigerian mobile
-  /\b0[7-9][0-1]\d{8}\b/g,                           // local 0xx format
-  /\b(\d[\s\-.]?){10,13}\b/g,                        // generic 10-13 digit number sequences
-];
-
-const maskPhoneNumbers = (text) => {
-  if (!text) return { masked: text, wasFiltered: false };
-  let result = text;
-  let wasFiltered = false;
-
-  for (const pattern of PHONE_PATTERNS) {
-    const replaced = result.replace(pattern, '[phone hidden]');
-    if (replaced !== result) {
-      wasFiltered = true;
-      result = replaced;
-    }
-  }
-
-  return { masked: result, wasFiltered };
-};
+const maskPhoneNumbers = (text) => ({ masked: text, wasFiltered: false });
 
 // ── Helper: verify user is a party to the job ─────────────────────────────────
 const getJobAndVerifyAccess = async (jobId, userId) => {
@@ -98,10 +76,10 @@ const getJobAndVerifyAccess = async (jobId, userId) => {
     return { error: 'Not authorized to access this chat.', status: 403 };
   }
 
-  // Chat only available on active/completed jobs
-  const validStatuses = ['accepted', 'in-progress', 'completed', 'disputed'];
+  // Chat is available from the moment a job is created (pending direct jobs already have an artisan assigned)
+  const validStatuses = ['pending', 'accepted', 'in-progress', 'completed', 'disputed'];
   if (!validStatuses.includes(job.status)) {
-    return { error: 'Chat is only available once a job is accepted.', status: 400 };
+    return { error: 'Chat is not available for this job.', status: 400 };
   }
 
   return { job, isCustomer, isArtisan };
