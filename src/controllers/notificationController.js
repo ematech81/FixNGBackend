@@ -121,6 +121,20 @@ exports.getUnreadCount = async (req, res) => {
   }
 };
 
+// ─── PATCH /api/notifications/read-by-job/:jobId — Mark new_message notifications for one job as read ─
+exports.markJobMessagesRead = async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { userId: req.user._id, read: false, type: 'new_message', 'data.jobId': req.params.jobId },
+      { read: true }
+    );
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to mark messages as read.' });
+  }
+};
+
 // ─── PATCH /api/notifications/:id/read — Mark one as read ────────────────────
 exports.markRead = async (req, res) => {
   try {
@@ -135,13 +149,13 @@ exports.markRead = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/notifications/read-all — Mark all as read ────────────────────
+// ─── PATCH /api/notifications/read-all — Mark all (or filtered subset) as read ─
 exports.markAllRead = async (req, res) => {
   try {
-    await Notification.updateMany(
-      { userId: req.user._id, read: false },
-      { read: true }
-    );
+    const filter = { userId: req.user._id, read: false };
+    if (req.body?.type)  filter.type = req.body.type;
+    if (req.body?.jobId) filter['data.jobId'] = req.body.jobId;
+    await Notification.updateMany(filter, { read: true });
     res.status(200).json({ success: true });
   } catch (err) {
     console.error(err);
