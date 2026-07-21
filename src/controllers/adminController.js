@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const ArtisanProfile = require('../models/ArtisanProfile');
+const Subscription = require('../models/Subscription');
 const Job = require('../models/Job');
 const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
@@ -646,6 +647,34 @@ exports.revokePro = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to revoke Pro status.' });
+  }
+};
+
+// ─── POST /api/admin/cleanup-trials ──────────────────────────────────────────
+// One-time cleanup: removes auto-created trial subscriptions and revokes the
+// Pro status they granted. Safe to call multiple times (idempotent).
+exports.cleanupTrials = async (req, res) => {
+  try {
+    const trials = await Subscription.find({ status: 'trial' }).lean();
+
+    let revoked = 0;
+    for (const trial of trials) {
+      await Subscription.deleteOne({ _id: trial._id });
+      const updated = await ArtisanProfile.findOneAndUpdate(
+        { userId: trial.artisanId, proSource: 'subscription' },
+        { isPro: false, proSource: null, proGrantedAt: null, proGrantedBy: null }
+      );
+      if (updated) revoked++;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Removed ${trials.length} trial subscription(s) and revoked Pro from ${revoked} artisan(s).`,
+      data: { trialsRemoved: trials.length, proRevoked: revoked },
+    });
+  } catch (err) {
+    console.error('cleanupTrials error:', err);
+    res.status(500).json({ success: false, message: 'Cleanup failed.' });
   }
 };
 

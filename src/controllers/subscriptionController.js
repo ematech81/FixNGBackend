@@ -37,19 +37,10 @@ const formatSub = (sub) => {
 // ─── GET /api/subscriptions/me ────────────────────────────────────────────────
 exports.getMySubscription = async (req, res) => {
   try {
-    let sub = await Subscription.findOne({ artisanId: req.user._id }).lean();
-
-    if (!sub) {
-      // Auto-create trial for artisans that pre-date Kora Pay migration
-      if (req.user.role === 'artisan') {
-        sub = await helper.startTrial(req.user._id);
-        sub = sub.toObject ? sub.toObject() : sub;
-      } else {
-        return res.status(200).json({ success: true, data: null });
-      }
-    }
-
-    res.status(200).json({ success: true, data: formatSub(sub) });
+    const sub = await Subscription.findOne({ artisanId: req.user._id }).lean();
+    // Return null when no subscription exists — artisan must explicitly subscribe.
+    // Pro status is only granted via payment or admin action, never automatically.
+    res.status(200).json({ success: true, data: sub ? formatSub(sub) : null });
   } catch (err) {
     console.error('getMySubscription error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch subscription.' });
@@ -58,7 +49,7 @@ exports.getMySubscription = async (req, res) => {
 
 // ─── POST /api/subscriptions/initialize ──────────────────────────────────────
 exports.initializeSubscription = async (req, res) => {
-  const { cycle } = req.body;
+  const { cycle, redirectUrl: clientRedirectUrl } = req.body;
 
   if (!['monthly', 'quarterly', 'yearly'].includes(cycle)) {
     return res.status(400).json({ success: false, message: 'cycle must be monthly, quarterly, or yearly.' });
@@ -126,7 +117,9 @@ exports.initializeSubscription = async (req, res) => {
       cycle,
       artisanId:       req.user._id.toString(),
       notificationUrl: `${BACKEND_URL()}/api/webhooks/korapay`,
-      redirectUrl:     `fixng://subscription/callback?reference=${reference}`,
+      redirectUrl:     clientRedirectUrl
+        ? `${clientRedirectUrl}?reference=${reference}`
+        : `fixng://subscription/callback?reference=${reference}`,
     });
 
     res.status(200).json({

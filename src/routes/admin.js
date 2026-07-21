@@ -16,6 +16,7 @@ const {
   banArtisan,
   grantPro,
   revokePro,
+  cleanupTrials,
   warnCustomer,
   suspendCustomer,
   unsuspendCustomer,
@@ -66,5 +67,8 @@ router.post('/complaints/:complaintId/resolve', resolveComplaint);
 
 // Announcements
 router.post('/announce', broadcastAnnouncement);
+
+// One-time cleanup — remove auto-created trial subscriptions and revoke their Pro status
+router.post('/cleanup-trials', cleanupTrials);
 
 module.exports = router;
