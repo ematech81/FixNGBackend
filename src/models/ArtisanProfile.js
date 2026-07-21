@@ -191,11 +191,10 @@ ArtisanProfileSchema.pre('save', function (next) {
     this.onboardingComplete = true;
   }
 
-  // Move to 'pending' (admin review queue) when ID is uploaded (not skipped).
-  // Video upload is optional and does not affect eligibility for review.
-  const idUploaded = s.profilePhoto && s.skills && s.location && s.verificationId && !sk.verificationId;
-  if (idUploaded && this.verificationStatus === 'incomplete') {
-    this.verificationStatus = 'pending';
+  // Auto-approve when all steps are complete — no manual admin review required.
+  // ID verification is optional; skipping it does not block approval.
+  if (allDone && this.verificationStatus === 'incomplete') {
+    this.verificationStatus = 'verified';
   }
 
   // Auto-compute badge level
