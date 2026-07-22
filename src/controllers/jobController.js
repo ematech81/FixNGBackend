@@ -711,15 +711,17 @@ exports.getJob = async (req, res) => {
 // ─── GET /api/jobs/my — Customer or artisan sees their own jobs ────────────────
 exports.getMyJobs = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, as: queryAs } = req.query;
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const skip  = (page - 1) * limit;
 
-    const query =
-      req.user.role === 'customer'
-        ? { customerId: req.user._id }
-        : { assignedArtisanId: req.user._id };
+    // `as=customer` forces customer-side query regardless of current role,
+    // allowing artisans who previously booked jobs to still see them.
+    const actingAsCustomer = queryAs === 'customer' || req.user.role === 'customer';
+    const query = actingAsCustomer
+      ? { customerId: req.user._id }
+      : { assignedArtisanId: req.user._id };
 
     if (status) query.status = status;
 
