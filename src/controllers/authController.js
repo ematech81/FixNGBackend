@@ -541,9 +541,15 @@ exports.getMe = async (req, res) => {
     let artisanProfile = null;
 
     if (user.role === 'artisan') {
-      artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-        'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel isPro proSource'
-      );
+      const raw = await ArtisanProfile.findOne({ userId: user._id })
+        .select('verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel isPro proSource profilePhoto bio skills location')
+        .lean();
+      if (raw) {
+        artisanProfile = {
+          ...raw,
+          profilePhoto: raw.profilePhoto?.url || null,
+        };
+      }
     }
 
     res.status(200).json({
