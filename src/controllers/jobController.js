@@ -687,7 +687,7 @@ exports.getJob = async (req, res) => {
     if (!job) return res.status(404).json({ success: false, message: 'Job not found.' });
 
     const userId = req.user._id.toString();
-    const isCustomer = job.customerId._id.toString() === userId;
+    const isCustomer = job.customerId?._id?.toString() === userId;
     const isArtisan = job.assignedArtisanId?._id?.toString() === userId;
     const isAdmin = req.user.role === 'admin';
 
