@@ -15,11 +15,15 @@ const server = http.createServer(app);
 app.set('trust proxy', 1);
 
 // ── CORS — allow web clients (Vercel + local dev) ─────────────────────────────
+// WEB_ORIGIN supports comma-separated values, e.g:
+// WEB_ORIGIN=https://fixng-web-version.vercel.app,https://www.fixng.com
+const extraOrigins = process.env.WEB_ORIGIN
+  ? process.env.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:3001',
-  'https://fixng.vercel.app',
-  ...(process.env.WEB_ORIGIN ? [process.env.WEB_ORIGIN] : []),
+  ...extraOrigins,
 ];
 app.use(cors({
   origin: (origin, cb) => {
