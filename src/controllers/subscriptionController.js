@@ -29,6 +29,7 @@ const formatSub = (sub) => {
     endsAt:         sub.endsAt,
     graceEndsAt:    sub.graceEndsAt,
     cancelledAt:    sub.cancelledAt,
+    isCancelling:   sub.isCancelling ?? false,
     daysRemaining,
     isAllowed:      ['trial', 'active', 'grace'].includes(sub.status),
   };
@@ -207,18 +208,34 @@ exports.verifySubscription = async (req, res) => {
 };
 
 // ─── POST /api/subscriptions/cancel ──────────────────────────────────────────
+// Sets isCancelling = true so the artisan keeps access until their endsAt date,
+// then the subscriptionTick cron transitions the status to 'cancelled'.
+// This matches what the UI tells the user: "access continues until period end."
 exports.cancelSubscription = async (req, res) => {
   try {
     const sub = await Subscription.findOne({ artisanId: req.user._id });
-    if (!sub || sub.status === 'expired' || sub.status === 'cancelled') {
+
+    if (!sub || ['expired', 'cancelled'].includes(sub.status)) {
       return res.status(400).json({ success: false, message: 'No active subscription to cancel.' });
     }
 
-    await Subscription.findByIdAndUpdate(sub._id, { cancelledAt: new Date(), status: 'cancelled' });
+    if (sub.isCancelling) {
+      return res.status(400).json({
+        success: false,
+        message: 'Subscription is already scheduled for cancellation at the end of the billing period.',
+      });
+    }
+
+    await Subscription.findByIdAndUpdate(sub._id, {
+      isCancelling: true,
+      cancelledAt:  new Date(),
+    });
+
+    const endsAt = sub.endsAt ? new Date(sub.endsAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' }) : 'your billing date';
 
     res.status(200).json({
       success: true,
-      message: 'Subscription cancelled. You can request a refund within 48 hours if eligible.',
+      message: `Subscription cancelled. You keep full Pro access until ${endsAt}. You can request a refund within 48 hours if eligible.`,
     });
   } catch (err) {
     console.error('cancelSubscription error:', err);

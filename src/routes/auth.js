@@ -43,6 +43,7 @@ const loginLimiter = rateLimit({
 const {
   register,
   login,
+  adminLogin,
   getMe,
   checkDevice,
   sendOTPHandler,
@@ -66,6 +67,9 @@ router.post('/otp/verify-register', otpVerifyLimiter, verifyRegister);
 
 // Step 2b: verify OTP + log in existing account
 router.post('/otp/verify-login', otpVerifyLimiter, verifyLoginOTP);
+
+// ── Admin login — phone + email, no OTP ──────────────────────────────────────
+router.post('/admin-login', loginLimiter, adminLogin);
 
 // ── Email / password flow (legacy / admin) ─────────────────────────────────────
 router.post(

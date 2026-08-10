@@ -34,6 +34,10 @@ const subscriptionSchema = new mongoose.Schema(
 
     cancelledAt: { type: Date, default: null },
 
+    // True while the artisan has requested cancellation but endsAt hasn't passed yet.
+    // The middleware still allows access; the cron moves to 'cancelled' when endsAt passes.
+    isCancelling: { type: Boolean, default: false },
+
     currentTransactionId: {
       type:    mongoose.Schema.Types.ObjectId,
       ref:     'Transaction',
@@ -54,8 +58,9 @@ subscriptionSchema.virtual('daysRemaining').get(function () {
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 });
 
-// Compound indexes for subscriptionTick hourly queries — avoids full-collection scans
-subscriptionSchema.index({ status: 1, endsAt: 1 });      // active → grace
-subscriptionSchema.index({ status: 1, graceEndsAt: 1 }); // grace → expired
+// Compound indexes for subscriptionTick queries — avoids full-collection scans
+subscriptionSchema.index({ status: 1, endsAt: 1 });                    // active → grace / cancelled
+subscriptionSchema.index({ status: 1, graceEndsAt: 1 });               // grace → expired / cancelled
+subscriptionSchema.index({ isCancelling: 1, status: 1, endsAt: 1 });   // cancelling active → cancelled
 
 module.exports = mongoose.model('Subscription', subscriptionSchema);

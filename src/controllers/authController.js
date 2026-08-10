@@ -240,10 +240,8 @@ exports.verifyRegister = async (req, res) => {
         } catch (codeErr) {
           console.warn('[artisanCode] non-fatal on register:', codeErr.message);
         }
-        // Start 7-day free trial for every new artisan (non-fatal if it fails)
-        require('../helpers/subscriptionHelper').startTrial(user._id).catch(
-          (e) => console.warn('[startTrial] non-fatal on register:', e.message)
-        );
+        // Pro status is NOT granted on registration.
+        // Artisans become pro via paid subscription or admin grant only.
       } catch (profileErr) {
         // Profile creation failed — roll back the user so the phone isn't locked
         await User.findByIdAndDelete(user._id);
@@ -311,6 +309,33 @@ exports.verifyLoginOTP = async (req, res) => {
     await buildAuthResponse(user, 200, res);
   } catch (err) {
     console.error('verifyLoginOTP error:', err);
+    res.status(500).json({ success: false, message: 'Login failed. Please try again.' });
+  }
+};
+
+// ─── POST /api/auth/admin-login (phone only, admin role only, no OTP) ────────
+exports.adminLogin = async (req, res) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, message: 'Phone number is required.' });
+  }
+
+  try {
+    const normalized = normalizePhone(phone.trim());
+    const user = await User.findOne({ phone: normalized, role: 'admin' });
+
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'No admin account found for this phone number.' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ success: false, message: 'This account has been deactivated.' });
+    }
+
+    await buildAuthResponse(user, 200, res);
+  } catch (err) {
+    console.error('adminLogin error:', err);
     res.status(500).json({ success: false, message: 'Login failed. Please try again.' });
   }
 };
@@ -411,10 +436,8 @@ exports.becomeArtisan = async (req, res) => {
         console.warn('[artisanCode] non-fatal on becomeArtisan:', codeErr.message);
       }
       await User.findByIdAndUpdate(userId, codeUpdates);
-      // Start 7-day free trial (non-fatal if it fails)
-      require('../helpers/subscriptionHelper').startTrial(userId).catch(
-        (e) => console.warn('[startTrial] non-fatal on becomeArtisan:', e.message)
-      );
+      // Pro status is NOT granted on becomeArtisan.
+      // Artisans become pro via paid subscription or admin grant only.
     }
 
     const jwt = require('jsonwebtoken');

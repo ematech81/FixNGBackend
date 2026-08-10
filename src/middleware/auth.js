@@ -62,13 +62,22 @@ exports.restrictTo = (...roles) => {
   };
 };
 
-// Gate routes that require an active subscription (trial / active / grace pass; expired / cancelled block)
+// Gate routes that require an active subscription (trial / active / grace pass; expired / cancelled block).
+// isCancelling subs still pass — the artisan keeps access until their endsAt date.
 exports.requireActiveSubscription = async (req, res, next) => {
   try {
     const Subscription = require('../models/Subscription');
     const sub = await Subscription.findOne({ artisanId: req.user._id }).lean();
 
-    if (!sub || ['expired', 'cancelled'].includes(sub.status)) {
+    // 'cancelled' without isCancelling means access was revoked immediately (legacy data or admin action).
+    // 'cancelled' WITH isCancelling means the artisan requested cancellation but period hasn't ended;
+    //  check endsAt to decide — the cron will flip status once the date passes.
+    const isHardCancelled =
+      sub?.status === 'cancelled' && !sub?.isCancelling;
+    const isCancellingButExpired =
+      sub?.status === 'cancelled' && sub?.isCancelling; // cron should have handled this, but guard anyway
+
+    if (!sub || sub.status === 'expired' || isHardCancelled || isCancellingButExpired) {
       return res.status(403).json({
         success: false,
         code:    'SUBSCRIPTION_REQUIRED',
@@ -79,6 +88,7 @@ exports.requireActiveSubscription = async (req, res, next) => {
       });
     }
 
+    // isCancelling but still within the paid period — allow
     req.subscription = sub;
     next();
   } catch (err) {

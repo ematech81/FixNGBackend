@@ -11,33 +11,60 @@ const tick = async () => {
   console.log('[subscriptionTick] running at', now.toISOString());
 
   try {
-    // ── active → grace ──────────────────────────────────────────────────────
-    const toGrace = await Subscription.find({ status: 'active', endsAt: { $lt: now } });
+    // ── active (isCancelling) → cancelled ──────────────────────────────────
+    // Artisan requested cancellation — period is now over. Skip grace entirely.
+    const cancellingExpired = await Subscription.find({
+      status:       'active',
+      isCancelling: true,
+      endsAt:       { $lt: now },
+    });
+    for (const sub of cancellingExpired) {
+      await Subscription.findByIdAndUpdate(sub._id, { status: 'cancelled' });
+      await syncProStatus(sub.artisanId, false);
+      notify(
+        sub.artisanId,
+        'subscription',
+        'Subscription Ended',
+        'Your cancelled subscription has ended. Subscribe anytime to regain Pro access.',
+        {}
+      );
+      console.log('[subscriptionTick] active(cancelling)→cancelled', sub.artisanId);
+    }
+
+    // ── active (not cancelling) → grace ────────────────────────────────────
+    const toGrace = await Subscription.find({
+      status:       'active',
+      isCancelling: { $ne: true },
+      endsAt:       { $lt: now },
+    });
     for (const sub of toGrace) {
       await Subscription.findByIdAndUpdate(sub._id, { status: 'grace' });
       notify(
         sub.artisanId,
         'subscription',
         'Subscription Expired',
-        `Your Pro subscription has expired. You have ${process.env.SUB_GRACE_DAYS || 3} days to renew before being removed from search results.`,
+        `Your Pro subscription has expired. You have ${process.env.SUB_GRACE_DAYS || 3} days to renew before your Pro badge is removed and your listing is deprioritised in search results.`,
         {}
       );
       console.log('[subscriptionTick] active→grace', sub.artisanId);
     }
 
-    // ── grace → expired ──────────────────────────────────────────────────────
+    // ── grace → expired (or cancelled if isCancelling) ─────────────────────
     const toExpired = await Subscription.find({ status: 'grace', graceEndsAt: { $lt: now } });
     for (const sub of toExpired) {
-      await Subscription.findByIdAndUpdate(sub._id, { status: 'expired' });
+      const newStatus = sub.isCancelling ? 'cancelled' : 'expired';
+      await Subscription.findByIdAndUpdate(sub._id, { status: newStatus });
       await syncProStatus(sub.artisanId, false);
       notify(
         sub.artisanId,
         'subscription',
         'Subscription Ended',
-        'Your grace period has ended. Subscribe to be discoverable again and receive new jobs.',
+        sub.isCancelling
+          ? 'Your cancelled subscription grace period has ended. Subscribe anytime to regain Pro access.'
+          : 'Your grace period has ended. Your Pro badge has been removed and you now appear lower in search results. Subscribe anytime to restore your Pro badge and priority placement.',
         {}
       );
-      console.log('[subscriptionTick] grace→expired', sub.artisanId);
+      console.log(`[subscriptionTick] grace→${newStatus}`, sub.artisanId);
     }
 
     // ── trial → expired ──────────────────────────────────────────────────────
@@ -49,11 +76,12 @@ const tick = async () => {
         sub.artisanId,
         'subscription',
         'Free Trial Ended',
-        'Your 7-day free trial has ended. Subscribe to continue appearing in search results and receiving job requests.',
+        'Your 7-day free trial has ended. You are still visible to clients and can receive job requests — but your Pro badge has been removed and you now appear lower in search results. Subscribe to restore your Pro badge and priority placement.',
         {}
       );
       console.log('[subscriptionTick] trial→expired', sub.artisanId);
     }
+
     // ── pending jobs past expiresAt → expired ────────────────────────────────
     const expiredJobs = await Job.updateMany(
       { status: 'pending', expiresAt: { $lt: now } },
@@ -70,7 +98,7 @@ const tick = async () => {
 module.exports = () => {
   // Run once immediately on startup to catch any transitions missed while server was down
   tick();
-  // Then every hour
-  cron.schedule('0 * * * *', tick);
-  console.log('[subscriptionTick] scheduled — runs hourly');
+  // Run every 15 minutes (was hourly — faster transitions for paid subscriptions)
+  cron.schedule('*/15 * * * *', tick);
+  console.log('[subscriptionTick] scheduled — runs every 15 minutes');
 };

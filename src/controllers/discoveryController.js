@@ -71,11 +71,17 @@ exports.searchArtisans = async (req, res) => {
         .limit(fetchLimit)
         .lean();
 
-      // Sort: verified + pro first, then by distance
+      // Sort: 3-tier ordering — Pro first, verified non-Pro second, unverified last.
+      // Uses badgeLevel (already in select) rather than verificationStatus (not selected).
+      //   Tier 2 = isPro active
+      //   Tier 1 = verified/trusted badge, no active subscription
+      //   Tier 0 = new (unverified)
+      // Within each tier: higher rating first; distance is preserved by $near pre-sort.
       raw.sort((a, b) => {
-        const scoreA = (a.isPro ? 2 : 0) + (a.verificationStatus === 'verified' ? 1 : 0);
-        const scoreB = (b.isPro ? 2 : 0) + (b.verificationStatus === 'verified' ? 1 : 0);
-        return scoreB - scoreA;
+        const tierA = a.isPro ? 2 : (a.badgeLevel === 'verified' || a.badgeLevel === 'trusted') ? 1 : 0;
+        const tierB = b.isPro ? 2 : (b.badgeLevel === 'verified' || b.badgeLevel === 'trusted') ? 1 : 0;
+        if (tierB !== tierA) return tierB - tierA;
+        return (b.stats?.averageRating ?? 0) - (a.stats?.averageRating ?? 0);
       });
       profiles = raw.slice(skip, skip + parseInt(limit));
     } else {

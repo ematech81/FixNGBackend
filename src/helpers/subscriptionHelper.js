@@ -42,6 +42,8 @@ const startTrial = async (artisanId) => {
   if (existing) return existing;
 
   const now = new Date();
+  // Trial subscription is created for record-keeping only.
+  // It does NOT grant pro status — pro is earned via paid subscription or admin grant.
   const sub = await Subscription.create({
     artisanId,
     status:    'trial',
@@ -52,7 +54,6 @@ const startTrial = async (artisanId) => {
     graceEndsAt: daysFromNow(ENV.sub.trialDays),
   });
 
-  await syncProStatus(artisanId, true);
   return sub;
 };
 
@@ -88,6 +89,7 @@ const processSuccess = async (transactionId) => {
           endsAt,
           graceEndsAt,
           cancelledAt:          null,
+          isCancelling:         false,   // clear cancellation flag on re-subscribe
           currentTransactionId: tx._id,
         },
         { upsert: true, new: true, session }

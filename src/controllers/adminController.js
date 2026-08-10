@@ -50,16 +50,32 @@ exports.getUsers = async (req, res) => {
 // ─── GET /api/admin/artisans — List artisans with verification status filter ──
 exports.getArtisans = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, isPro, isVerified, search } = req.query;
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 30));
     const skip  = (page - 1) * limit;
 
     const query = {};
-    if (status) query.verificationStatus = status;
+    if (status)               query.verificationStatus = status;
+    if (isPro === 'true')     query.isPro = true;
+    if (isVerified === 'true') query.verificationStatus = 'verified';
+
+    // Search by name or phone via user join
+    let userIdFilter = null;
+    if (search) {
+      const safe = search.trim().slice(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const matchedUsers = await User.find({
+        $or: [
+          { name:  { $regex: safe, $options: 'i' } },
+          { phone: { $regex: safe, $options: 'i' } },
+        ],
+      }).select('_id').lean();
+      userIdFilter = matchedUsers.map((u) => u._id);
+      query.userId = { $in: userIdFilter };
+    }
 
     const profiles = await ArtisanProfile.find(query)
-      .populate('userId', 'name phone email createdAt isActive')
+      .populate('userId', 'name phone email artisanCode createdAt isActive')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -73,21 +89,30 @@ exports.getArtisans = async (req, res) => {
       name: p.userId?.name,
       phone: p.userId?.phone,
       email: p.userId?.email,
+      artisanCode: p.userId?.artisanCode,
       verificationStatus: p.verificationStatus,
       badgeLevel: p.badgeLevel,
+      isPro: p.isPro,
+      proSource: p.proSource ?? null,
       isSuspended: p.isSuspended,
       isBanned: p.isBanned,
       warningCount: p.warningCount,
       onboardingComplete: p.onboardingComplete,
       stats: p.stats,
       skills: p.skills,
+      profilePhoto: p.profilePhoto,
+      verificationId: p.verificationId,
+      skillVideo: p.skillVideo,
+      location: p.location,
+      bio: p.bio,
       joinedAt: p.userId?.createdAt,
     }));
 
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total },
+      total,
+      pagination: { page, limit, total },
     });
   } catch (err) {
     console.error(err);
@@ -156,7 +181,7 @@ exports.searchArtisans = async (req, res) => {
 exports.getArtisanDetail = async (req, res) => {
   try {
     const profile = await ArtisanProfile.findOne({ userId: req.params.artisanUserId })
-      .populate('userId', 'name phone email createdAt isActive')
+      .populate('userId', 'name phone email artisanCode createdAt isActive')
       .lean();
 
     if (!profile) {
