@@ -1,6 +1,23 @@
 require('dotenv').config();
 require('./config/env');   // fail-fast validation of Kora Pay env vars
 
+// ── Process-level safety net ──────────────────────────────────────────────────
+// Prevents a single unhandled promise rejection or thrown error in a cron job,
+// socket handler, or background task from crashing the entire process.
+// Railway will still restart on genuine fatal errors (OOM, port conflict, etc.)
+// because those throw BEFORE this handler can log them.
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[process] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  // Do NOT exit — let Railway's health-check decide if the process is unhealthy
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[process] Uncaught Exception:', err);
+  // Exit so Railway restarts the service; uncaught exceptions leave the
+  // process in an undefined state and should not be swallowed silently.
+  process.exit(1);
+});
+
 const http    = require('http');
 const express = require('express');
 const cors    = require('cors');
