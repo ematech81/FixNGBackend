@@ -19,14 +19,12 @@ const normalizePhone = (phone) => {
   return `+234${cleaned}`;
 };
 
-// BulkSMS Nigeria only delivers reliably 8am–6pm WAT (UTC+1)
-const isOutsideBulkSmsHours = () => {
-  const watHour = (new Date().getUTCHours() + 1) % 24;
-  return watHour < 8 || watHour >= 18;
-};
-
 /**
  * Generate, store, and dispatch an OTP.
+ * SMS is always attempted first — BulkSMS Nigeria queues messages when
+ * network delivery windows are closed, so no proactive hour-blocking needed.
+ * If SMS fails, falls back to email. If no email available and SMS fails, throws.
+ *
  * @param {string}  phone       - raw Nigerian phone number
  * @param {string}  [email]     - email address for fallback delivery
  * @param {boolean} [forceEmail=false] - skip SMS, deliver straight to email
@@ -66,24 +64,22 @@ exports.sendOTP = async (phone, email = null, forceEmail = false) => {
     return { normalized, emailUsed: true, maskedEmail: maskEmail(email) };
   }
 
-  // ── Outside BulkSMS hours → email fallback ───────────────────────────────────
-  if (isOutsideBulkSmsHours() && email) {
-    console.log(`[OTP] Outside BulkSMS hours → email fallback → ${maskEmail(email)}`);
-    await sendOtpEmail(email, otp);
-    return { normalized, emailUsed: true, maskedEmail: maskEmail(email) };
-  }
-
-  // ── Standard SMS with email fallback on failure ──────────────────────────────
+  // ── SMS first, email fallback on failure ─────────────────────────────────────
+  // BulkSMS Nigeria's API works 24/7 and queues undeliverable messages.
+  // We always try SMS and only fall back to email if the API call itself fails.
   try {
     await bulkSms.sendOTP(normalized, otp);
+    console.log(`[OTP] SMS sent to ${normalized}`);
     return { normalized, emailUsed: false };
   } catch (smsErr) {
+    console.warn(`[OTP] BulkSMS failed (${smsErr.message})`);
     if (email) {
-      console.warn(`[OTP] BulkSMS failed (${smsErr.message}) → email fallback → ${maskEmail(email)}`);
+      console.log(`[OTP] Email fallback → ${maskEmail(email)}`);
       await sendOtpEmail(email, otp);
       return { normalized, emailUsed: true, maskedEmail: maskEmail(email) };
     }
-    throw smsErr;
+    // No email available — re-throw with a clear user-facing message
+    throw new Error('Could not send your access key. Please add an email address and try again, or contact support.');
   }
 };
 
