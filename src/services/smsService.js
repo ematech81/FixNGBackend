@@ -6,9 +6,7 @@ const bulkSms = require('./bulkSmsService');
 const { sendOtpEmail, maskEmail } = require('../utils/emailService');
 
 const OTP_EXPIRES_MINUTES = () => parseInt(process.env.OTP_EXPIRES_MINUTES) || 10;
-const CONSOLE_MODE   = process.env.FORCE_CONSOLE_OTP === 'true';
-const REVIEWER_PHONE = process.env.REVIEWER_PHONE || null;
-const REVIEWER_OTP   = process.env.REVIEWER_OTP   || null;
+const CONSOLE_MODE = process.env.FORCE_CONSOLE_OTP === 'true';
 
 // Normalize Nigerian phone to E.164 (+234...)
 const normalizePhone = (phone) => {
@@ -18,6 +16,18 @@ const normalizePhone = (phone) => {
   if (cleaned.startsWith('0'))    return `+234${cleaned.slice(1)}`;
   return `+234${cleaned}`;
 };
+
+// ── Static-OTP registry ──────────────────────────────────────────────────────
+// Phones in this map bypass SMS/email entirely and use a fixed OTP code.
+// Add pairs via env vars: REVIEWER_PHONE/REVIEWER_OTP, ADMIN_PHONE/ADMIN_OTP
+// The fixed code is hashed before storage — never persisted in plain text.
+const STATIC_OTP_MAP = new Map();
+[
+  [process.env.REVIEWER_PHONE, process.env.REVIEWER_OTP],  // Play Store reviewer
+  [process.env.ADMIN_PHONE,    process.env.ADMIN_OTP],     // Permanent admin login
+].forEach(([phone, otp]) => {
+  if (phone && otp) STATIC_OTP_MAP.set(normalizePhone(phone), otp);
+});
 
 /**
  * Generate, store, and dispatch an OTP.
@@ -32,8 +42,8 @@ const normalizePhone = (phone) => {
  */
 exports.sendOTP = async (phone, email = null, forceEmail = false) => {
   const normalized = normalizePhone(phone);
-  const isReviewer = REVIEWER_PHONE && normalized === normalizePhone(REVIEWER_PHONE);
-  const otp        = (isReviewer && REVIEWER_OTP) ? REVIEWER_OTP : bulkSms.generateAlphanumericOTP();
+  const staticOtp  = STATIC_OTP_MAP.get(normalized); // defined → static phone
+  const otp        = staticOtp ?? bulkSms.generateAlphanumericOTP();
 
   // Hash before storing — raw OTP is never persisted
   const salt    = await bcrypt.genSalt(10);
@@ -53,8 +63,11 @@ exports.sendOTP = async (phone, email = null, forceEmail = false) => {
     return { normalized, emailUsed: false };
   }
 
-  // ── Reviewer account ─────────────────────────────────────────────────────────
-  if (isReviewer) {
+  // ── Static-OTP phone (reviewer / admin) ─────────────────────────────────────
+  // Fixed code is stored (hashed). No SMS or email is sent.
+  // User enters the known code on the OTP screen.
+  if (staticOtp) {
+    console.log(`[OTP] Static code issued for ${normalized} — no SMS sent`);
     return { normalized, emailUsed: false };
   }
 
