@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const { ALLOWED_ORIGINS } = require('../config/allowedOrigins');
 
 let io;
 
@@ -8,7 +9,14 @@ const connectedUsers = new Map();
 
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
-    cors: { origin: '*' },
+    cors: {
+      origin: (origin, cb) => {
+        // allow requests with no origin (mobile apps, curl, Postman)
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        cb(new Error(`CORS: origin ${origin} not allowed`));
+      },
+      credentials: true,
+    },
     pingTimeout: 60000,    // keep alive on flaky Nigerian networks
     pingInterval: 25000,
   });
