@@ -26,6 +26,8 @@ const {
   resolveDispute,
   getDashboardStats,
   broadcastAnnouncement,
+  getAnnouncements,
+  deleteAnnouncement,
 } = require('../controllers/adminController');
 
 // All admin routes — admin role only
@@ -67,6 +69,8 @@ router.post('/complaints/:complaintId/resolve', resolveComplaint);
 
 // Announcements
 router.post('/announce', broadcastAnnouncement);
+router.get('/announcements', getAnnouncements);
+router.delete('/announcements/:id', deleteAnnouncement);
 
 // One-time cleanup — remove auto-created trial subscriptions and revoke their Pro status
 router.post('/cleanup-trials', cleanupTrials);

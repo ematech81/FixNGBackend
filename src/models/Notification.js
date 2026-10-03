@@ -41,6 +41,8 @@ const notificationSchema = new mongoose.Schema(
       jobId:      { type: String, default: null },
       senderId:   { type: String, default: null },
       senderName: { type: String, default: null },
+      // set on admin announcements so deleting one removes every copy
+      announcementId: { type: String, default: null, index: true },
     },
     read:      { type: Boolean, default: false, index: true },
     // pinned = shows as a persistent home-screen banner until dismissed

@@ -4,6 +4,8 @@ const Subscription = require('../models/Subscription');
 const Job = require('../models/Job');
 const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
+const Announcement = require('../models/Announcement');
+const Notification = require('../models/Notification');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 
@@ -817,13 +819,23 @@ exports.broadcastAnnouncement = async (req, res) => {
     const userQuery = role === 'all' ? {} : { role };
     const users = await User.find(userQuery).select('_id').lean();
 
+    const announcement = await Announcement.create({
+      title: title.trim(),
+      body: body.trim(),
+      targetRole: role,
+      sentBy: req.user?._id,
+      recipientCount: users.length,
+    });
+
     // Create a notification for every matched user — batch in chunks to avoid memory spikes
     const CHUNK = 200;
     for (let i = 0; i < users.length; i += CHUNK) {
       const chunk = users.slice(i, i + CHUNK);
       await Promise.all(
         chunk.map((u) =>
-          notify(u._id, 'announcement', title.trim(), body.trim(), {})
+          notify(u._id, 'announcement', title.trim(), body.trim(), {
+            announcementId: announcement._id.toString(),
+          })
         )
       );
     }
@@ -831,10 +843,50 @@ exports.broadcastAnnouncement = async (req, res) => {
     res.status(200).json({
       success: true,
       message: `Announcement sent to ${users.length} user(s).`,
-      data: { count: users.length, targetRole: role },
+      data: { count: users.length, targetRole: role, announcementId: announcement._id },
     });
   } catch (err) {
     console.error('broadcastAnnouncement error:', err);
     res.status(500).json({ success: false, message: 'Failed to send announcement.' });
+  }
+};
+
+// ─── GET /api/admin/announcements — Announcement history (newest first) ───────
+exports.getAnnouncements = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const announcements = await Announcement.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('sentBy', 'name')
+      .lean();
+    res.json({ success: true, data: announcements });
+  } catch (err) {
+    console.error('getAnnouncements error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch announcements.' });
+  }
+};
+
+// ─── DELETE /api/admin/announcements/:id — Remove it and every user's copy ────
+exports.deleteAnnouncement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const announcement = await Announcement.findByIdAndDelete(id);
+    if (!announcement) {
+      return res.status(404).json({ success: false, message: 'Announcement not found.' });
+    }
+    // Removes the in-app notification and the pinned home-screen banner for every user.
+    // Push notifications already delivered to devices cannot be recalled.
+    const { deletedCount } = await Notification.deleteMany({
+      type: 'announcement',
+      'data.announcementId': id,
+    });
+    res.json({
+      success: true,
+      message: `Announcement deleted (${deletedCount} user copies removed).`,
+    });
+  } catch (err) {
+    console.error('deleteAnnouncement error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete announcement.' });
   }
 };
