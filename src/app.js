@@ -23,6 +23,7 @@ const express = require('express');
 const cors    = require('cors');
 const connectDB   = require('./config/db');
 const { initSocket } = require('./socket');
+const { ALLOWED_ORIGINS } = require('./config/allowedOrigins');
 
 const app    = express();
 const server = http.createServer(app);
@@ -31,17 +32,8 @@ const server = http.createServer(app);
 // client IP from X-Forwarded-For instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 app.set('trust proxy', 1);
 
-// ── CORS — allow web clients (Vercel + local dev) ─────────────────────────────
-// WEB_ORIGIN supports comma-separated values, e.g:
-// WEB_ORIGIN=https://fixng-web-version.vercel.app,https://www.fixng.com
-const extraOrigins = process.env.WEB_ORIGIN
-  ? process.env.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
-  : [];
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  ...extraOrigins,
-];
+// ── CORS — allow web clients (custom domain + Vercel + local dev) ─────────────
+// Origin list lives in config/allowedOrigins.js (WEB_ORIGIN adds extras).
 app.use(cors({
   origin: (origin, cb) => {
     // allow requests with no origin (mobile apps, curl, Postman)
