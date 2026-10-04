@@ -9,18 +9,73 @@ const maskEmail = (email) => {
   return `${local[0]}***@${domain}`;
 };
 
-const sendOtpEmail = async (email, otp) => {
+/**
+ * Core sender — Brevo transactional HTTP API. Throws on failure.
+ * Use directly only where the caller must know the email failed (e.g. OTP);
+ * use sendEmailSafe for everything else.
+ *
+ * Sender defaults to FixNG <nwankwolivinus95@gmail.com> (the address verified in
+ * Brevo); BREVO_FROM_EMAIL / BREVO_FROM_NAME / BREVO_REPLY_TO env vars override.
+ * Use a real address, not noreply — spam filters penalise noreply senders.
+ *
+ * @param {object}   opts
+ * @param {string}   opts.to
+ * @param {string}   opts.subject
+ * @param {string}   opts.html
+ * @param {string}   opts.text
+ * @param {string[]} [opts.tags]  filterable in the Brevo dashboard
+ * @param {boolean}  [opts.brand] send from the domain address (BREVO_BRAND_FROM_EMAIL,
+ *   default info@fixng.com.ng) instead of the OTP sender. Same Brevo account and
+ *   API key — info@fixng.com.ng must stay a verified sender there. OTP never uses it.
+ */
+const sendEmail = async ({ to, subject, html, text, tags = [], brand = false }) => {
   const apiKey   = process.env.BREVO_API_KEY;
-  // Use a real sending address, not noreply — spam filters penalise noreply senders
-  const fromAddr = process.env.BREVO_FROM_EMAIL || 'nwankwolivinu95@gmail.com';
-  const fromName = process.env.BREVO_FROM_NAME  || 'FixNG';
-  const replyTo  = process.env.BREVO_REPLY_TO   || 'nwankwolivinu95@gmail.com';
-  const expiry   = parseInt(process.env.OTP_EXPIRES_MINUTES) || 10;
+  const fromAddr = brand
+    ? (process.env.BREVO_BRAND_FROM_EMAIL || 'info@fixng.com.ng')
+    : (process.env.BREVO_FROM_EMAIL || 'nwankwolivinus95@gmail.com');
+  const fromName = process.env.BREVO_FROM_NAME || 'FixNG';
+  const replyTo  = brand
+    ? (process.env.BREVO_BRAND_FROM_EMAIL || 'info@fixng.com.ng')
+    : (process.env.BREVO_REPLY_TO || 'nwankwolivinus95@gmail.com');
 
   if (!apiKey) {
     console.error('[Email] BREVO_API_KEY not set');
     throw new Error('Email service not configured. Please contact support.');
   }
+
+  try {
+    await axios.post(
+      BREVO_URL,
+      {
+        sender:      { name: fromName, email: fromAddr },
+        replyTo:     { email: replyTo },
+        to:          [{ email: to }],
+        subject,
+        textContent: text,
+        htmlContent: html,
+        tags:        ['transactional', ...tags],
+      },
+      { headers: { 'api-key': apiKey, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+  } catch (err) {
+    console.error('[Email] Brevo error:', err.response?.data || err.message);
+    throw new Error('Could not send email.');
+  }
+};
+
+/**
+ * Fire-and-forget wrapper: never throws and never needs awaiting, so a failed
+ * email can't break the request that triggered it. Sends from the domain
+ * address (info@fixng.com.ng) by default; pass brand: false for the OTP sender.
+ */
+const sendEmailSafe = (opts) => {
+  sendEmail({ brand: true, ...opts })
+    .then(() => console.log(`[Email] ${opts.tags?.[0] ?? 'email'} sent to ${maskEmail(opts.to)}`))
+    .catch((err) => console.error(`[Email] ${opts.tags?.[0] ?? 'email'} to ${maskEmail(opts.to)} failed: ${err.message}`));
+};
+
+const sendOtpEmail = async (email, otp) => {
+  const expiry = parseInt(process.env.OTP_EXPIRES_MINUTES) || 10;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -68,7 +123,7 @@ const sendOtpEmail = async (email, otp) => {
           <td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px">
             <p style="margin:0;font-size:12px;color:#9CA3AF">
               © ${new Date().getFullYear()} FixNG Artisan Marketplace · Nigeria<br>
-              Questions? Reply to this email or contact <a href="mailto:support@fixng.app" style="color:#2563EB;text-decoration:none">support@fixng.app</a>
+              Questions? Reply to this email or contact <a href="mailto:info@fixng.com.ng" style="color:#2563EB;text-decoration:none">info@fixng.com.ng</a>
             </p>
           </td>
         </tr>
@@ -79,25 +134,20 @@ const sendOtpEmail = async (email, otp) => {
 </body>
 </html>`;
 
+  // OTP must surface failures — the caller falls back / tells the user.
   try {
-    await axios.post(
-      BREVO_URL,
-      {
-        sender:      { name: fromName, email: fromAddr },
-        replyTo:     { email: replyTo },
-        to:          [{ email }],
-        subject:     `${otp} is your FixNG verification code`,
-        textContent: `Your FixNG verification code is: ${otp}\n\nValid for ${expiry} minutes. Never share this code with anyone.\n\nIf you didn't request this, ignore this email.\n\n© ${new Date().getFullYear()} FixNG`,
-        htmlContent: html,
-        tags:        ['otp', 'transactional'],
-      },
-      { headers: { 'api-key': apiKey, 'Content-Type': 'application/json' }, timeout: 15000 }
-    );
+    await sendEmail({
+      to:      email,
+      subject: `${otp} is your FixNG verification code`,
+      html,
+      text:    `Your FixNG verification code is: ${otp}\n\nValid for ${expiry} minutes. Never share this code with anyone.\n\nIf you didn't request this, ignore this email.\n\n© ${new Date().getFullYear()} FixNG`,
+      tags:    ['otp'],
+    });
     console.log(`[Email] OTP sent to ${maskEmail(email)}`);
   } catch (err) {
-    console.error('[Email] Brevo error:', err.response?.data || err.message);
+    if (err.message.startsWith('Email service not configured')) throw err;
     throw new Error('Could not send OTP email. Please try again.');
   }
 };
 
-module.exports = { sendOtpEmail, maskEmail };
+module.exports = { sendEmail, sendEmailSafe, sendOtpEmail, maskEmail };

@@ -5,6 +5,7 @@ const Complaint = require('../models/Complaint');
 const cloudinary = require('../config/cloudinary');
 const { emitToUsers, emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
+const { emailUser } = require('../utils/emailNotifications');
 const { TIER_LIMITS, getArtisanPlan } = require('../utils/subscriptionLimits');
 
 // Search radius in meters — artisans within this range get notified
@@ -116,6 +117,12 @@ exports.createJob = async (req, res) => {
         `New ${job.category} job: ${job.description.substring(0, 80)}`,
         { jobId: job._id.toString() }
       );
+      emailUser(artisanId, 'job_request', {
+        category: job.category,
+        description: job.description.substring(0, 160),
+        location: job.location.state || job.location.address,
+        isDirect: true,
+      });
     } else {
       // Broadcast: notify nearby verified artisans with matching skill
       let nearbyProfiles;
@@ -313,6 +320,11 @@ exports.acceptJob = async (req, res) => {
       `${artisan.name} has accepted your ${job.category} request.${eta}`,
       { jobId: job._id.toString(), senderName: artisan.name }
     );
+    emailUser(job.customerId, 'job_accepted', {
+      artisanName: artisan.name,
+      category: job.category,
+      eta: job.estimatedArrivalMinutes,
+    });
 
     // Notify other artisans who were notified that job is now taken
     const othersToNotify = job.notifiedArtisans.filter(

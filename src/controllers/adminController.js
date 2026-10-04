@@ -6,6 +6,7 @@ const Complaint = require('../models/Complaint');
 const Review = require('../models/Review');
 const Announcement = require('../models/Announcement');
 const Notification = require('../models/Notification');
+const { emailUser } = require('../utils/emailNotifications');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 
@@ -216,6 +217,7 @@ exports.verifyArtisan = async (req, res) => {
       'Congratulations! Your profile has been verified. You can now receive job requests.',
       {}
     );
+    emailUser(req.params.artisanUserId, 'artisan_verified');
 
     res.status(200).json({ success: true, message: 'Artisan verified.' });
   } catch (err) {
@@ -250,6 +252,7 @@ exports.rejectArtisan = async (req, res) => {
       `Your profile was not approved. Reason: ${profile.rejectionReason}`,
       {}
     );
+    emailUser(req.params.artisanUserId, 'artisan_rejected', { reason: profile.rejectionReason });
 
     res.status(200).json({ success: true, message: 'Artisan rejected.' });
   } catch (err) {
@@ -285,6 +288,7 @@ exports.warnArtisan = async (req, res) => {
       reason.trim(),
       {}
     );
+    emailUser(req.params.artisanUserId, 'account_warning', { reason: reason.trim(), warningCount: profile.warningCount });
 
     res.status(200).json({
       success: true,
@@ -323,6 +327,7 @@ exports.suspendArtisan = async (req, res) => {
       `Your account has been suspended. Reason: ${reason.trim()}`,
       {}
     );
+    emailUser(req.params.artisanUserId, 'account_suspended', { reason: reason.trim() });
 
     res.status(200).json({ success: true, message: 'Artisan suspended.' });
   } catch (err) {
@@ -721,6 +726,7 @@ exports.warnCustomer = async (req, res) => {
       `Account Warning #${user.warningCount}`,
       reason.trim(), {}
     );
+    emailUser(req.params.userId, 'account_warning', { reason: reason.trim(), warningCount: user.warningCount });
     res.status(200).json({ success: true, message: 'Warning issued.', data: { warningCount: user.warningCount } });
   } catch (err) {
     console.error(err);
@@ -742,6 +748,7 @@ exports.suspendCustomer = async (req, res) => {
       'Account Suspended',
       reason.trim(), {}
     );
+    emailUser(req.params.userId, 'account_suspended', { reason: reason.trim() });
     res.status(200).json({ success: true, message: 'Customer suspended.' });
   } catch (err) {
     console.error(err);

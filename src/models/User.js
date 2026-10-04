@@ -50,6 +50,11 @@ const UserSchema = new mongoose.Schema(
       enum: ['phone', 'email'],
       default: 'phone',
     },
+    // Marketing email consent — explicit opt-in at registration (default off).
+    // Only meaningful when the user has an email. Export contacts where this is
+    // true for Brevo campaigns; transactional emails don't depend on it.
+    marketingOptIn:   { type: Boolean, default: false },
+    marketingOptInAt: { type: Date, default: null },
     // Expo push token — updated each time the app registers on a device
     expoPushToken: {
       type: String,

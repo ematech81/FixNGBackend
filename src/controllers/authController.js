@@ -4,6 +4,7 @@ const User = require('../models/User');
 const ArtisanProfile = require('../models/ArtisanProfile');
 const { sendOTP, verifyOTP, normalizePhone } = require('../services/smsService');
 const { generateArtisanCode } = require('../utils/generateArtisanCode');
+const { emailUser } = require('../utils/emailNotifications');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -220,6 +221,9 @@ exports.verifyRegister = async (req, res) => {
       });
     }
 
+    // Marketing consent counts only when explicitly true AND there is an email to send to
+    const marketingOptIn = req.body.marketingOptIn === true && !!email;
+
     const user = await User.create({
       name:            name.trim(),
       phone:           result.normalized,
@@ -227,6 +231,8 @@ exports.verifyRegister = async (req, res) => {
       role,
       authMethod:      'phone',
       isPhoneVerified: true,
+      marketingOptIn,
+      marketingOptInAt: marketingOptIn ? new Date() : null,
     });
 
     if (role === 'artisan') {
@@ -250,6 +256,7 @@ exports.verifyRegister = async (req, res) => {
       }
     }
 
+    emailUser(user._id, 'welcome', { role });
     await buildAuthResponse(user, 201, res);
   } catch (err) {
     console.error('verifyRegister error:', err);
