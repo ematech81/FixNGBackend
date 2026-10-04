@@ -138,6 +138,20 @@ exports.sendOTPHandler = async (req, res) => {
       resolvedEmail = existing?.email || null;
     }
 
+    // Fail fast when the email is already registered to a DIFFERENT phone number,
+    // instead of sending a code and only rejecting after it is entered (and consumed).
+    // An email that belongs to this same phone's account is fine (login flow).
+    if (resolvedEmail) {
+      const { normalizePhone } = require('../services/smsService');
+      const emailOwner = await User.findOne({ email: resolvedEmail }).select('phone').lean();
+      if (emailOwner && emailOwner.phone !== normalizePhone(normalized)) {
+        return res.status(400).json({
+          success: false,
+          message: 'This email is already registered to another account. Use a different email or log in.',
+        });
+      }
+    }
+
     const result = await sendOTP(normalized, resolvedEmail, !!forceEmail);
 
     res.status(200).json({
