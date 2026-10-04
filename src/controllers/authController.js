@@ -104,6 +104,7 @@ exports.checkDevice = async (req, res) => {
       isNewUser: false,
       phone:    normalized,
       hasEmail:  !!user?.email,
+      smsSent:   otpResult.smsSent,
       emailUsed: otpResult.emailUsed,
       ...(otpResult.maskedEmail ? { maskedEmail: otpResult.maskedEmail } : {}),
     });
@@ -157,9 +158,12 @@ exports.sendOTPHandler = async (req, res) => {
     res.status(200).json({
       success: true,
       message: result.emailUsed
-        ? 'Your access key has been sent to your email.'
+        ? (result.smsSent
+            ? 'Your access key has been sent to your phone and email.'
+            : 'Your access key has been sent to your email.')
         : 'Your access key has been sent. It may take up to 2 minutes to arrive.',
       phone: result.normalized,
+      smsSent: result.smsSent,
       emailUsed: result.emailUsed,
       ...(result.maskedEmail ? { maskedEmail: result.maskedEmail } : {}),
     });

@@ -74,26 +74,40 @@ exports.sendOTP = async (phone, email = null, forceEmail = false) => {
   // ── Force email ──────────────────────────────────────────────────────────────
   if (forceEmail && email) {
     await sendOtpEmail(email, otp);
-    return { normalized, emailUsed: true, maskedEmail: maskEmail(email) };
+    return { normalized, smsSent: false, emailUsed: true, maskedEmail: maskEmail(email) };
   }
 
-  // ── SMS first, email fallback on failure ─────────────────────────────────────
-  // BulkSMS Nigeria's API works 24/7 and queues undeliverable messages.
-  // We always try SMS and only fall back to email if the API call itself fails.
-  try {
-    await bulkSms.sendOTP(normalized, otp);
-    console.log(`[OTP] SMS sent to ${normalized}`);
-    return { normalized, emailUsed: false };
-  } catch (smsErr) {
-    console.warn(`[OTP] BulkSMS failed (${smsErr.message})`);
-    if (email) {
-      console.log(`[OTP] Email fallback → ${maskEmail(email)}`);
-      await sendOtpEmail(email, otp);
-      return { normalized, emailUsed: true, maskedEmail: maskEmail(email) };
-    }
-    // No email available — re-throw with a clear user-facing message
-    throw new Error('Could not send your access key. Please add an email address and try again, or contact support.');
+  // ── SMS and email together ───────────────────────────────────────────────────
+  // BulkSMS's route accepts messages at any hour but HOLDS them ("Scheduled")
+  // until the carrier window reopens (~8 pm–8 am), so an accepted API call does
+  // not mean the code arrives in time. When the user has an email, send both
+  // channels in parallel; the OTP works if either one succeeds.
+  const [smsResult, emailResult] = await Promise.allSettled([
+    bulkSms.sendOTP(normalized, otp),
+    email ? sendOtpEmail(email, otp) : Promise.reject(new Error('no email')),
+  ]);
+  const smsSent   = smsResult.status === 'fulfilled';
+  const emailSent = emailResult.status === 'fulfilled';
+
+  if (smsSent) console.log(`[OTP] SMS sent to ${normalized}`);
+  else console.warn(`[OTP] BulkSMS failed (${smsResult.reason?.message})`);
+  if (email && !emailSent) console.warn(`[OTP] Email failed (${emailResult.reason?.message})`);
+
+  if (!smsSent && !emailSent) {
+    throw new Error(
+      email
+        ? 'Could not send your access key. Please try again, or contact support.'
+        : 'Could not send your access key. Please add an email address and try again, or contact support.'
+    );
   }
+
+  // emailUsed = the code went to the email (alone or alongside SMS); smsSent tells clients which.
+  return {
+    normalized,
+    smsSent,
+    emailUsed: emailSent,
+    ...(emailSent ? { maskedEmail: maskEmail(email) } : {}),
+  };
 };
 
 // Verify OTP — returns { valid, normalized } or { valid: false, reason }
