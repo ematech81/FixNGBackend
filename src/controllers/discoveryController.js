@@ -14,6 +14,7 @@ const haversineKm = (lat1, lon1, lat2, lon2) => {
 const Review = require('../models/Review');
 const Job = require('../models/Job');
 const User = require('../models/User');
+const { notify } = require('./notificationController');
 
 // ─── GET /api/artisans — Search nearby verified artisans ─────────────────────
 // Query params: category, latitude, longitude, maxDistance (km), minRating, page
@@ -282,6 +283,13 @@ exports.rateJob = async (req, res) => {
       overallScore,
       comment: comment?.trim() || null,
     });
+
+    // Non-critical: tell the artisan (notify never throws)
+    notify(job.assignedArtisanId, 'review_received',
+      'New Review',
+      `${req.user.name} rated you ${overallScore}/5${comment?.trim() ? `: "${comment.trim().substring(0, 80)}"` : '.'}`,
+      { jobId: String(jobId) }
+    );
 
     // ── Non-critical: update artisan stats ────────────────────────────────────
     // Single atomic pipeline update — eliminates the read-modify-write race condition

@@ -33,6 +33,8 @@ const notificationSchema = new mongoose.Schema(
         'account_unsuspended',
         // Admin broadcasts
         'announcement',      // admin: platform-wide or role-targeted announcement
+        'subscription',      // artisan: subscription expired / grace / ended (subscriptionTick)
+        'review_received',   // artisan: a customer rated a completed job
       ],
     },
     title: { type: String, required: true },
