@@ -108,4 +108,27 @@ const sendOTP = async (phoneNumber, otpCode) => {
   }
 };
 
-module.exports = { generateAlphanumericOTP, formatNigerianNumber, sendOTP };
+// ── sendText ──────────────────────────────────────────────────────────────────
+// Sends a plain (non-OTP) message, e.g. a job alert. Same gateway/credentials as
+// sendOTP; throws on failure so callers can decide how to handle it.
+const sendText = async (phoneNumber, message) => {
+  const to = formatNigerianNumber(phoneNumber);
+  const { data } = await axios.post(
+    `${BASE_URL()}/sms`,
+    { from: SENDER_ID(), to, body: message, gateway: 'direct-refund' },
+    {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN()}`,
+        'Content-Type': 'application/json',
+        Accept:         'application/json',
+      },
+      timeout: 15000,
+    }
+  );
+  if (data?.code !== 'BSNG-0000') {
+    throw new Error(`BulkSMS error ${data?.code || '(no code)'}: ${data?.description || ''}`.trim());
+  }
+  return { success: true, messageId: data.message_id };
+};
+
+module.exports = { generateAlphanumericOTP, formatNigerianNumber, sendOTP, sendText };

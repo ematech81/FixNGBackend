@@ -143,6 +143,32 @@ const TEMPLATES = {
     cta: { label: 'View job', url: SITE_URL },
   }),
 
+  // Broadcast job to nearby artisans (sent from notify(); low priority + throttled)
+  job_broadcast: ({ name, body, jobId }) => ({
+    subject: 'New job near you on FixNG',
+    heading: 'A new job near you',
+    paragraphs: [
+      `Hi ${firstName(name)}, a customer near you needs help.`,
+      body,
+      'Other artisans were alerted too — the first to respond usually gets the job.',
+    ],
+    cta: { label: 'View available jobs', url: `${SITE_URL}/artisan/jobs/available` },
+  }),
+
+  // New chat message (sent from notify(); low priority + throttled)
+  new_message: ({ name, role, body, jobId, senderName }) => ({
+    subject: `New message${senderName ? ` from ${senderName}` : ''} on FixNG`,
+    heading: 'You have a new message',
+    paragraphs: [
+      `Hi ${firstName(name)}, ${senderName || 'someone'} sent you a message on FixNG:`,
+      `“${body}”`,
+    ],
+    cta: {
+      label: 'Reply on FixNG',
+      url: `${SITE_URL}/${role === 'artisan' ? 'artisan' : 'customer'}/messages${jobId ? `/${jobId}` : ''}`,
+    },
+  }),
+
   job_accepted: ({ name, artisanName, category, eta }) => ({
     subject: 'An artisan accepted your FixNG job',
     heading: 'Your job was accepted',
@@ -154,19 +180,50 @@ const TEMPLATES = {
   }),
 };
 
+// ── Throttle + daily cap for high-frequency emails ───────────────────────────
+// In-memory (per server process): resets on restart, which is acceptable for
+// rate-limiting. Low-priority emails (broadcast jobs, chat messages) can never use
+// more than EMAIL_LOW_PRIORITY_DAILY_CAP of Brevo's free 300/day, so OTP, welcome
+// and booking emails always have room.
+const lastSent = new Map();            // `${userId}:${template}` -> timestamp
+let lowCount = 0;
+let lowCountDay = '';
+
+const lagosDay = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+const lowPriorityCap = () => parseInt(process.env.EMAIL_LOW_PRIORITY_DAILY_CAP, 10) || 150;
+
+const allowLowPriority = () => {
+  const today = lagosDay();
+  if (today !== lowCountDay) { lowCountDay = today; lowCount = 0; }
+  return lowCount < lowPriorityCap();
+};
+
 /**
  * Email a user about an event. Never throws, never needs awaiting, and does
  * nothing for users without an email — safe to call from any request handler.
+ *
+ * @param {object}  [opts]
+ * @param {number}  [opts.throttleMs]   skip if this user got this template within the window
+ * @param {boolean} [opts.lowPriority]  counts against the low-priority daily cap
  */
-const emailUser = (userId, template, vars = {}) => {
+const emailUser = (userId, template, vars = {}, opts = {}) => {
   (async () => {
     const build = TEMPLATES[template];
     if (!build) return console.error(`[Email] unknown template: ${template}`);
 
-    const user = await User.findById(userId).select('name email').lean();
+    const throttleKey = `${userId}:${template}`;
+    if (opts.throttleMs && Date.now() - (lastSent.get(throttleKey) || 0) < opts.throttleMs) return;
+    if (opts.lowPriority && !allowLowPriority()) {
+      return console.warn(`[Email] low-priority daily cap reached — skipped ${template}`);
+    }
+
+    const user = await User.findById(userId).select('name email role').lean();
     if (!user?.email) return;
 
-    const { subject, heading, paragraphs, cta } = build({ name: user.name, ...vars });
+    if (opts.throttleMs) lastSent.set(throttleKey, Date.now());
+    if (opts.lowPriority) lowCount += 1;
+
+    const { subject, heading, paragraphs, cta } = build({ name: user.name, role: user.role, ...vars });
     const { html, text } = render({ heading, paragraphs, cta });
     sendEmailSafe({ to: user.email, subject, html, text, tags: [template] });
   })().catch((err) => console.error(`[Email] ${template} failed before send:`, err.message));

@@ -216,6 +216,15 @@ exports.verifyRegister = async (req, res) => {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, message: 'Invalid email address format.' });
     }
+    // Artisans must give an email: it is how job and message alerts reach them
+    // (the website has no push, and SMS alerts are limited).
+    if (role === 'artisan' && !email) {
+      return res.status(400).json({
+        success: false,
+        emailRequired: true,
+        message: 'An email address is required for artisan accounts so you receive job and message alerts.',
+      });
+    }
     if (email) {
       const emailTaken = await User.findOne({ email }).lean();
       if (emailTaken) {
@@ -442,6 +451,15 @@ exports.register = async (req, res) => {
 exports.becomeArtisan = async (req, res) => {
   try {
     const userId = req.user._id;
+
+    // Artisans must have an email (job/message alerts). The client adds it first via PUT /auth/profile.
+    if (!req.user.email) {
+      return res.status(400).json({
+        success: false,
+        emailRequired: true,
+        message: 'Please add your email address first — it is how you receive job and message alerts.',
+      });
+    }
 
     // Upsert instead of create — bypasses Mongoose validators so schema
     // changes (e.g. new enum fields) never break onboarding for new artisans.

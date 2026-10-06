@@ -2,6 +2,9 @@ const Notification = require('../models/Notification');
 const User         = require('../models/User');
 const { emitToUser } = require('../socket');
 const { sendPush }   = require('../services/pushService');
+const webPush        = require('../services/webPushService');
+const PushSubscription = require('../models/PushSubscription');
+const { emailUser }  = require('../utils/emailNotifications');
 
 // Types that show as a persistent home-screen banner until dismissed
 const PINNED_TYPES = new Set([
@@ -11,6 +14,21 @@ const PINNED_TYPES = new Set([
   'job_broadcast',
   'announcement',
 ]);
+
+// Notification types that also trigger an email. These can be frequent, so they are
+// low-priority: throttled per user and held under a daily cap (see emailNotifications).
+const EMAIL_ON_NOTIFY = {
+  new_message:   { template: 'new_message',   throttleMs: 30 * 60 * 1000 },
+  job_broadcast: { template: 'job_broadcast', throttleMs: 15 * 60 * 1000 },
+};
+
+// Where a tapped web-push notification should open
+const webPushUrl = (role, type, data) => {
+  if (role === 'admin') return '/admin/dashboard';
+  const base = role === 'artisan' ? '/artisan' : '/customer';
+  if (type === 'new_message') return data?.jobId ? `${base}/messages/${data.jobId}` : `${base}/messages`;
+  return `${base}/notifications`;
+};
 
 // ─── Helper: create + emit + push a notification ──────────────────────────────
 const notify = async (userId, type, title, body, data = {}) => {
@@ -29,11 +47,24 @@ const notify = async (userId, type, title, body, data = {}) => {
       createdAt: notif.createdAt,
     });
 
-    User.findById(userId).select('expoPushToken').lean().then((user) => {
+    User.findById(userId).select('expoPushToken role').lean().then((user) => {
       if (user?.expoPushToken) {
         sendPush(user.expoPushToken, title, body, { type, ...data });
       }
+      // Browser push for website users (no-op until they opt in / VAPID keys are set)
+      webPush.sendWebPush(userId, {
+        title,
+        body,
+        type,
+        url: webPushUrl(user?.role, type, data),
+        tag: data?.jobId ? `${type}-${data.jobId}` : type,
+      });
     }).catch(() => {});
+
+    const emailRule = EMAIL_ON_NOTIFY[type];
+    if (emailRule) {
+      emailUser(userId, emailRule.template, { title, body, ...data }, { throttleMs: emailRule.throttleMs, lowPriority: true });
+    }
 
     return notif;
   } catch (err) {
@@ -171,6 +202,51 @@ exports.deleteNotification = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Failed to delete notification.' });
+  }
+};
+
+// ─── GET /api/notifications/web-push/key — VAPID public key for the browser ───
+exports.getWebPushKey = (req, res) => {
+  res.status(200).json({ success: true, enabled: webPush.isEnabled(), publicKey: webPush.getPublicKey() });
+};
+
+// ─── POST /api/notifications/web-push/subscribe — Save this browser's subscription
+// Body: { subscription: { endpoint, keys: { p256dh, auth } } }
+exports.subscribeWebPush = async (req, res) => {
+  try {
+    const sub = req.body?.subscription;
+    if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+      return res.status(400).json({ success: false, message: 'Invalid push subscription.' });
+    }
+    // Upsert by endpoint: a browser belongs to whoever subscribed last
+    await PushSubscription.findOneAndUpdate(
+      { endpoint: sub.endpoint },
+      {
+        userId: req.user._id,
+        endpoint: sub.endpoint,
+        keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
+        userAgent: (req.headers['user-agent'] || '').slice(0, 250),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('subscribeWebPush error:', err);
+    res.status(500).json({ success: false, message: 'Could not save push subscription.' });
+  }
+};
+
+// ─── POST /api/notifications/web-push/unsubscribe — Remove this browser (e.g. on logout)
+// Body: { endpoint }
+exports.unsubscribeWebPush = async (req, res) => {
+  try {
+    const endpoint = req.body?.endpoint;
+    if (!endpoint) return res.status(400).json({ success: false, message: 'endpoint is required.' });
+    await PushSubscription.deleteOne({ endpoint, userId: req.user._id });
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('unsubscribeWebPush error:', err);
+    res.status(500).json({ success: false, message: 'Could not remove push subscription.' });
   }
 };
 

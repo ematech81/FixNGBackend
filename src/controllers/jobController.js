@@ -6,6 +6,7 @@ const cloudinary = require('../config/cloudinary');
 const { emitToUsers, emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 const { emailUser } = require('../utils/emailNotifications');
+const { smsDirectJobAlert } = require('../utils/jobAlertSms');
 const { TIER_LIMITS, getArtisanPlan } = require('../utils/subscriptionLimits');
 
 // Search radius in meters — artisans within this range get notified
@@ -123,6 +124,7 @@ exports.createJob = async (req, res) => {
         location: job.location.state || job.location.address,
         isDirect: true,
       });
+      smsDirectJobAlert(artisanId, { category: job.category });
     } else {
       // Broadcast: notify nearby verified artisans with matching skill
       let nearbyProfiles;
