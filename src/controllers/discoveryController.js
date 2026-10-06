@@ -28,10 +28,14 @@ exports.searchArtisans = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // Build query — show all active artisans; verified ones rank first
+    // Build query — list only artisans whose public profile page actually works:
+    // verified (getArtisanProfile 404s for anyone else) and with at least one skill.
+    // Unfinished onboarding profiles used to appear as dead "Artisan"/"Nigeria" cards.
     const query = {
       isSuspended: { $ne: true },
       isBanned: { $ne: true },
+      verificationStatus: 'verified',
+      'skills.0': { $exists: true },
     };
 
     if (category) {
