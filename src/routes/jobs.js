@@ -22,6 +22,7 @@ const {
   markCompleted,
   raiseDispute,
   cancelJob,
+  getCancelPolicy,
   getJob,
   getMyJobs,
 } = require('../controllers/jobController');
@@ -42,6 +43,7 @@ router.post(
 router.get('/my', protect, restrictTo('customer', 'artisan'), getMyJobs);
 router.get('/:jobId', protect, getJob);
 router.post('/:jobId/dispute', protect, restrictTo('customer', 'artisan'), raiseDispute);
+router.get('/:jobId/cancel-policy', protect, restrictTo('customer', 'artisan'), getCancelPolicy);
 router.post('/:jobId/cancel', protect, restrictTo('customer', 'artisan'), cancelJob);
 router.post('/:jobId/rate', protect, restrictTo('customer'), rateJob);
 

@@ -122,7 +122,11 @@ const JobSchema = new mongoose.Schema(
     // ── Cancellation ──────────────────────────────────────────────────────────
     cancellation: {
       cancelledBy: { type: String, default: null },  // 'customer' | 'artisan' | 'admin' | null
-      reason: { type: String, default: null },
+      reason: { type: String, default: null },       // human-readable: reason label + the person's note
+      reasonCode: { type: String, default: null },   // e.g. 'found_other' (see constants/cancellation.js)
+      note: { type: String, default: null },         // free-text note from the canceller
+      phase: { type: String, default: null },        // status when cancelled: 'pending' | 'accepted'
+      isLate: { type: Boolean, default: false },     // counts against the canceller's record
     },
 
     // Emergency jobs expire faster if no artisan accepts

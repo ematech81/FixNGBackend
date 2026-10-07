@@ -143,6 +143,20 @@ const TEMPLATES = {
     cta: { label: 'View job', url: SITE_URL },
   }),
 
+  // Sent to the OTHER party when a job is cancelled. `toRole` = the recipient's role.
+  job_cancelled: ({ name, toRole, cancelledBy, category, reason }) => ({
+    subject: `A ${category || ''} job was cancelled on FixNG`.replace('  ', ' '),
+    heading: 'A job was cancelled',
+    paragraphs: [
+      `Hi ${firstName(name)}, ${cancelledBy === 'customer' ? 'the customer' : 'the artisan'} has cancelled the ${category || ''} job.`.replace('  ', ' '),
+      ...(reason ? [`Reason: ${reason}`] : []),
+      toRole === 'artisan'
+        ? 'Nothing else is needed from you. Keep an eye out for new job requests.'
+        : 'You can book another artisan any time.',
+    ],
+    cta: { label: toRole === 'artisan' ? 'View my jobs' : 'Find another artisan', url: toRole === 'artisan' ? `${SITE_URL}/artisan/jobs` : `${SITE_URL}/search` },
+  }),
+
   // ── Artisan outreach (sent by scripts/sendArtisanEmails.js and the reminder job) ──
 
   // Artisan who signed up but hasn't finished onboarding. `missing` = list of what's left.

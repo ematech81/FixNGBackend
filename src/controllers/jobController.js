@@ -7,6 +7,8 @@ const { emitToUsers, emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 const { emailUser } = require('../utils/emailNotifications');
 const { smsDirectJobAlert } = require('../utils/jobAlertSms');
+const Notification = require('../models/Notification');
+const { GRACE_MINUTES, WARN_RULES, reasonsFor } = require('../constants/cancellation');
 const { TIER_LIMITS, getArtisanPlan } = require('../utils/subscriptionLimits');
 
 // Search radius in meters — artisans within this range get notified
@@ -610,79 +612,201 @@ exports.raiseDispute = async (req, res) => {
   }
 };
 
+// ─── Cancellation policy ──────────────────────────────────────────────────────
+// Rules are documented in constants/cancellation.js. This works out, for one job and one
+// user, whether cancelling is allowed, what it will cost them, and which reasons to offer.
+const sinceDays = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
+const countCustomerLateCancels = (customerId) => Job.countDocuments({
+  customerId,
+  'cancellation.cancelledBy': 'customer',
+  'cancellation.isLate': true,
+  'timeline.cancelledAt': { $gte: sinceDays(WARN_RULES.customer.windowDays) },
+});
+
+const countArtisanCancels = (artisanId) => Job.countDocuments({
+  assignedArtisanId: artisanId,
+  'cancellation.cancelledBy': 'artisan',
+  'timeline.cancelledAt': { $gte: sinceDays(WARN_RULES.artisan.windowDays) },
+});
+
+const evaluateCancel = async (job, user) => {
+  const uid = user._id.toString();
+  const isCustomer = job.customerId.toString() === uid;
+  const isArtisan = job.assignedArtisanId?.toString() === uid;
+  if (!isCustomer && !isArtisan) return { forbidden: true, allowed: false, message: 'Not authorized.' };
+
+  const role = isCustomer ? 'customer' : 'artisan';
+  const base = { role, status: job.status, reasons: reasonsFor(role), graceMinutes: GRACE_MINUTES };
+
+  if (job.status === 'pending') {
+    if (role === 'artisan') {
+      return { ...base, allowed: false, message: 'You have not accepted this request yet. Use Decline instead.' };
+    }
+    return { ...base, allowed: true, phase: 'pending', isLate: false, message: 'Free to cancel — no artisan has accepted yet.' };
+  }
+
+  if (job.status === 'accepted') {
+    if (role === 'customer') {
+      const acceptedAt = job.timeline?.acceptedAt ? new Date(job.timeline.acceptedAt) : new Date(job.updatedAt);
+      const minutesSince = (Date.now() - acceptedAt.getTime()) / 60000;
+      const isLate = minutesSince > GRACE_MINUTES;
+      const lateCancellations = await countCustomerLateCancels(user._id);
+      return {
+        ...base, allowed: true, phase: 'accepted', isLate, lateCancellations,
+        graceMinutesLeft: isLate ? 0 : Math.max(1, Math.ceil(GRACE_MINUTES - minutesSince)),
+        message: isLate
+          ? `The artisan accepted this job more than ${GRACE_MINUTES} minutes ago. You can still cancel, but it counts as a late cancellation and the artisan will be told. ${WARN_RULES.customer.threshold} late cancellations within ${WARN_RULES.customer.windowDays} days lead to an account warning.`
+          : `Free cancellation — you have about ${Math.max(1, Math.ceil(GRACE_MINUTES - minutesSince))} minute(s) left to cancel without a late-cancellation record.`,
+      };
+    }
+    const cancellations = await countArtisanCancels(user._id);
+    return {
+      ...base, allowed: true, phase: 'accepted', isLate: true, cancellations,
+      message: `The customer is expecting you. Cancelling an accepted job counts against your record, and ${WARN_RULES.artisan.threshold} cancellations within ${WARN_RULES.artisan.windowDays} days lead to an account warning. You have cancelled ${cancellations} in that period.`,
+    };
+  }
+
+  if (job.status === 'in-progress') {
+    return { ...base, allowed: false, canDispute: true, message: 'The artisan has arrived and work has started, so this job can no longer be cancelled. If something is wrong, raise a dispute and an admin will review it.' };
+  }
+
+  return { ...base, allowed: false, message: `A job that is ${job.status} cannot be cancelled.` };
+};
+
+// ─── GET /api/jobs/:jobId/cancel-policy — What cancelling would mean right now ─
+exports.getCancelPolicy = async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found.' });
+    const policy = await evaluateCancel(job, req.user);
+    if (policy.forbidden) return res.status(403).json({ success: false, message: policy.message });
+    res.status(200).json({ success: true, data: policy });
+  } catch (err) {
+    console.error('getCancelPolicy error:', err);
+    res.status(500).json({ success: false, message: 'Could not load the cancellation policy.' });
+  }
+};
+
 // ─── POST /api/jobs/:jobId/cancel — Cancel a pending/accepted job ──────────────
+// Body: { reasonCode, note? }.  Clients that predate reason codes (old mobile builds send no
+// x-client header) may still cancel with no reason; web and new builds must give one.
 exports.cancelJob = async (req, res) => {
   try {
-    const { reason } = req.body;
+    const { reasonCode, note, reason } = req.body;
     const job = await Job.findById(req.params.jobId);
-
     if (!job) return res.status(404).json({ success: false, message: 'Job not found.' });
 
-    const isCustomer = job.customerId.toString() === req.user._id.toString();
-    const isArtisan = job.assignedArtisanId?.toString() === req.user._id.toString();
-
-    if (!isCustomer && !isArtisan) {
-      return res.status(403).json({ success: false, message: 'Not authorized.' });
+    const policy = await evaluateCancel(job, req.user);
+    if (policy.forbidden) return res.status(403).json({ success: false, message: policy.message });
+    if (!policy.allowed) {
+      return res.status(400).json({ success: false, canDispute: !!policy.canDispute, message: policy.message });
     }
 
-    // Only pending or accepted jobs can be cancelled
-    if (!['pending', 'accepted'].includes(job.status)) {
-      return res.status(400).json({
-        success: false,
-        message: `A job that is ${job.status} cannot be cancelled. Raise a dispute instead.`,
-      });
+    const role = policy.role;                     // 'customer' | 'artisan'
+    const legacyClient = !req.headers['x-client'];
+    const cleanNote = (note || '').trim().slice(0, 300);
+
+    let code = reasonCode;
+    let label = null;
+    if (!code) {
+      if (!legacyClient) {
+        return res.status(400).json({ success: false, message: 'Please choose a reason for cancelling.' });
+      }
+      code = reason?.trim() ? 'other' : 'unspecified';   // old app: free-text reason or none
+    } else {
+      const found = policy.reasons.find((r) => r.code === code);
+      if (!found) return res.status(400).json({ success: false, message: 'That is not a valid cancellation reason.' });
+      label = found.label;
+      if (code === 'other' && cleanNote.length < 5) {
+        return res.status(400).json({ success: false, message: 'Please tell us the reason (at least 5 characters).' });
+      }
     }
+    const reasonText = label
+      ? [label, cleanNote].filter(Boolean).join(' — ')
+      : (reason?.trim() || cleanNote || null);
 
-    const cancelledBy = isCustomer ? 'customer' : 'artisan';
-
-    // Atomic status update — prevents double-cancel if two requests race
+    // Atomic update — also requires the status we evaluated, so an artisan marking "arrived"
+    // in the same moment can't be overridden by a cancel.
     const updated = await Job.findOneAndUpdate(
-      { _id: req.params.jobId, status: { $in: ['pending', 'accepted'] } },
+      { _id: req.params.jobId, status: job.status },
       {
         $set: {
           status: 'cancelled',
           'timeline.cancelledAt': new Date(),
-          'cancellation.cancelledBy': cancelledBy,
-          'cancellation.reason': reason?.trim() || null,
+          'cancellation.cancelledBy': role,
+          'cancellation.reason': reasonText,
+          'cancellation.reasonCode': code,
+          'cancellation.note': cleanNote || null,
+          'cancellation.phase': policy.phase,
+          'cancellation.isLate': !!policy.isLate,
         },
       },
       { new: true }
     );
-
     if (!updated) {
-      return res.status(409).json({ success: false, message: 'Job was already cancelled.' });
+      return res.status(409).json({ success: false, message: 'This job just changed. Please refresh and check its status.' });
     }
 
-    if (isArtisan) {
+    if (role === 'artisan') {
       await ArtisanProfile.findOneAndUpdate(
         { userId: req.user._id },
         { $inc: { 'stats.cancelledJobs': 1, 'stats.totalJobs': 1 } }
       );
     }
 
-    // Notify the other party
-    const notifyUserId = isCustomer
-      ? job.assignedArtisanId?.toString()
-      : job.customerId.toString();
-
+    // Tell the other party (in-app + push + email, with the reason)
+    const notifyUserId = role === 'customer' ? job.assignedArtisanId?.toString() : job.customerId.toString();
     if (notifyUserId) {
-      emitToUser(notifyUserId, 'job_cancelled', {
-        jobId: job._id,
-        cancelledBy,
-        reason: job.cancellation.reason,
-      });
-      const cancelledByLabel = cancelledBy === 'customer' ? 'The customer' : 'The artisan';
+      emitToUser(notifyUserId, 'job_cancelled', { jobId: job._id, cancelledBy: role, reason: reasonText });
+      const who = role === 'customer' ? 'The customer' : 'The artisan';
       notify(notifyUserId, 'job_cancelled',
         'Job Cancelled',
-        `${cancelledByLabel} has cancelled the ${job.category} job.`,
+        `${who} has cancelled the ${job.category} job.${reasonText ? ` Reason: ${reasonText}` : ''}`,
         { jobId: job._id.toString() }
       );
+      emailUser(notifyUserId, 'job_cancelled', {
+        toRole: role === 'customer' ? 'artisan' : 'customer',
+        cancelledBy: role, category: job.category, reason: reasonText,
+      });
+    }
+
+    // A pending broadcast was cancelled: clear it from every notified artisan's dashboard
+    if (job.status === 'pending' && job.notifiedArtisans?.length) {
+      emitToUsers(job.notifiedArtisans, 'job_taken', { jobId: job._id });
+      Notification.updateMany(
+        { 'data.jobId': job._id.toString(), type: { $in: ['job_broadcast', 'new_job'] } },
+        { $set: { dismissed: true } }
+      ).catch(() => {});
+    }
+
+    // Repeated cancellations: automatic account warning (never blocks the cancel itself)
+    try {
+      const rule = WARN_RULES[role];
+      if (policy.isLate) {
+        const count = role === 'customer'
+          ? await countCustomerLateCancels(req.user._id)
+          : await countArtisanCancels(req.user._id);
+        if (count >= rule.threshold && count % rule.threshold === 0) {
+          const warnText = role === 'customer'
+            ? `You have cancelled accepted jobs late ${count} times in the last ${rule.windowDays} days. Repeated late cancellations can lead to restrictions on your account.`
+            : `You have cancelled ${count} accepted jobs in the last ${rule.windowDays} days. Customers rely on you showing up — repeated cancellations can lead to suspension.`;
+          const warned = role === 'customer'
+            ? await User.findByIdAndUpdate(req.user._id, { $inc: { warningCount: 1 } }, { new: true })
+            : await ArtisanProfile.findOneAndUpdate({ userId: req.user._id }, { $inc: { warningCount: 1 } }, { new: true });
+          notify(req.user._id, 'account_warning', `Account Warning #${warned?.warningCount ?? 1}`, warnText, {});
+        }
+      }
+    } catch (warnErr) {
+      console.error('cancelJob warning step failed (non-fatal):', warnErr.message);
     }
 
     res.status(200).json({
       success: true,
-      message: 'Job cancelled.',
-      data: { jobId: job._id, status: job.status },
+      message: policy.isLate && role === 'customer'
+        ? 'Job cancelled. This was recorded as a late cancellation.'
+        : 'Job cancelled.',
+      data: { jobId: job._id, status: updated.status, isLate: !!policy.isLate },
     });
   } catch (err) {
     console.error(err);
