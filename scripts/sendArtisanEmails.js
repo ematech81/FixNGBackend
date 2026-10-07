@@ -38,7 +38,28 @@ const writePreviews = (dir) => {
   }
 };
 
+// Send BOTH emails, with sample data, to a single address (e.g. your own) so you can check
+// delivery and how they look in a real inbox. Does not read or change any artisan data.
+const sendTest = async (to) => {
+  const { sendEmail } = require('../src/utils/emailService');
+  const samples = [
+    ['artisan_complete_profile', { name: 'Test Artisan', missing: ['Choose your skills and write a short bio', 'Set your location'] }],
+    ['artisan_welcome_onboarding', { name: 'Test Artisan' }],
+  ];
+  for (const [template, vars] of samples) {
+    const { subject, html, text } = outreach.build(template, vars);
+    await sendEmail({ to, subject: `[TEST] ${subject}`, html, text, tags: [template, 'test'], brand: true });
+    console.log(`sent test: ${subject}`);
+  }
+  console.log(`\nBoth test emails sent to ${maskEmail(to)}. Check the inbox AND the spam folder.`);
+};
+
 (async () => {
+  if (arg('test-to')) {
+    await sendTest(String(arg('test-to')));
+    return;
+  }
+
   if (arg('preview')) {
     // Needs no database
     writePreviews(path.resolve(String(arg('preview'))));
@@ -56,6 +77,9 @@ const writePreviews = (dir) => {
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
 
   let targets = audience === 'incomplete' ? await outreach.findIncomplete() : await outreach.findVerifiedNotWelcomed();
+  // Never email the same person a reminder twice from this script (the welcome is already
+  // de-duplicated by findVerifiedNotWelcomed). The automatic daily job handles follow-ups.
+  if (audience === 'incomplete') targets = targets.filter((t) => !(t.profile.outreach?.reminderCount > 0));
   const total = targets.length;
   targets = targets.slice(0, limit);
 

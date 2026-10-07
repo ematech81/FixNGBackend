@@ -5,6 +5,7 @@ const ArtisanProfile = require('../models/ArtisanProfile');
 const { sendOTP, verifyOTP, normalizePhone } = require('../services/smsService');
 const { generateArtisanCode } = require('../utils/generateArtisanCode');
 const { emailUser } = require('../utils/emailNotifications');
+const { isValidEmail } = require('../utils/emailValidation');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -133,6 +134,10 @@ exports.sendOTPHandler = async (req, res) => {
     // Resolve email: use request body value, or — when forceEmail and no email provided
     // — look up the existing user's stored email (login flow with no email field on screen)
     let resolvedEmail = rawEmail?.trim()?.toLowerCase() || null;
+    // Catch typos (e.g. "gmail..com") at the first step, before a code is sent to nowhere
+    if (resolvedEmail && !isValidEmail(resolvedEmail)) {
+      return res.status(400).json({ success: false, message: 'That email address looks mistyped. Please check it and try again.' });
+    }
     if (!resolvedEmail && forceEmail) {
       const { normalizePhone } = require('../services/smsService');
       const existing = await User.findOne({ phone: normalizePhone(normalized) }).select('email').lean();
@@ -213,7 +218,7 @@ exports.verifyRegister = async (req, res) => {
     // Validate and resolve email
     const { email: rawEmail } = req.body;
     const email = rawEmail?.trim()?.toLowerCase() || null;
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !isValidEmail(email)) {
       return res.status(400).json({ success: false, message: 'Invalid email address format.' });
     }
     // Artisans must give an email: it is how job and message alerts reach them
@@ -571,6 +576,10 @@ exports.updateUserProfile = async (req, res) => {
     if (name?.trim()) updates.name = name.trim();
     if (email !== undefined) {
       updates.email = email?.trim()?.toLowerCase() || null;
+    }
+
+    if (updates.email && !isValidEmail(updates.email)) {
+      return res.status(400).json({ success: false, message: 'That email address looks mistyped. Please check it and try again.' });
     }
 
     if (updates.email) {
