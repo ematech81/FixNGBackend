@@ -143,6 +143,37 @@ const TEMPLATES = {
     cta: { label: 'View job', url: SITE_URL },
   }),
 
+  // ── Artisan outreach (sent by scripts/sendArtisanEmails.js and the reminder job) ──
+
+  // Artisan who signed up but hasn't finished onboarding. `missing` = list of what's left.
+  artisan_complete_profile: ({ name, missing = [] }) => ({
+    subject: 'Finish setting up your FixNG profile — customers can’t see you yet',
+    heading: `You’re almost there, ${firstName(name)}`,
+    paragraphs: [
+      'Thanks for joining FixNG as an artisan. Your profile isn’t finished yet, so customers can’t find or book you.',
+      ...(missing.length ? ['What’s left to do:', ...missing.map((m) => `• ${m}`)] : []),
+      'It only takes a few minutes. Log in with your phone number and we’ll take you straight to where you stopped.',
+      'FixNG is in its onboarding stage: we’re signing up artisans first, and customers are joining every day. Artisans with complete profiles are the ones customers see and book, so finish now to be ready when job requests start coming in.',
+    ],
+    cta: { label: 'Complete my profile', url: `${SITE_URL}/artisan/onboarding` },
+  }),
+
+  // Official welcome to a completed artisan, setting honest expectations
+  artisan_welcome_onboarding: ({ name }) => ({
+    subject: 'Welcome to FixNG — you’re officially on board',
+    heading: `Welcome to FixNG, ${firstName(name)}!`,
+    paragraphs: [
+      'Thank you for joining FixNG as an artisan. We’re glad to have you.',
+      'Here’s where we are: FixNG is in its onboarding stage. We’re bringing in artisans like you first, and customers are now joining and searching for professionals on the platform. As more customers book, you’ll start receiving job requests.',
+      'To be ready when they arrive:',
+      '• Keep your profile complete — a clear photo, your skills and a short bio.',
+      '• Turn on alerts on your dashboard so you hear about a job the moment it comes.',
+      '• Keep your phone number and email up to date.',
+      'We’ll keep you updated as we grow. If you have any questions, just reply to this email.',
+    ],
+    cta: { label: 'Open my dashboard', url: `${SITE_URL}/artisan/dashboard` },
+  }),
+
   // Broadcast job to nearby artisans (sent from notify(); low priority + throttled)
   job_broadcast: ({ name, body, jobId }) => ({
     subject: 'New job near you on FixNG',

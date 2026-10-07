@@ -1,6 +1,7 @@
 const ArtisanProfile = require('../models/ArtisanProfile');
 const cloudinary = require('../config/cloudinary');
 const ARTISAN_SKILLS = require('../constants/skills');
+const { geocodeNigeria, isDefaultCoords } = require('../utils/nigeriaGeo');
 
 // Validate that a URL came from Cloudinary before storing it
 const isCloudinaryUrl = (url) => {
@@ -166,21 +167,20 @@ exports.updateLocation = async (req, res) => {
     }
 
     // Coordinates are optional — artisans who cannot use GPS submit address only.
-    // Fall back to Nigeria geographic centre so the GeoJSON Point is always valid.
-    const NIGERIA_CENTRE = { lat: 9.082, lng: 8.6753 };
-    let lat = NIGERIA_CENTRE.lat;
-    let lng = NIGERIA_CENTRE.lng;
-
-    if (latitude != null && longitude != null) {
-      const parsedLat = parseFloat(latitude);
-      const parsedLng = parseFloat(longitude);
-      if (!isNaN(parsedLat) && !isNaN(parsedLng) &&
-          parsedLat >= -90 && parsedLat <= 90 &&
-          parsedLng >= -180 && parsedLng <= 180 &&
-          !(parsedLat === 0 && parsedLng === 0)) {
-        lat = parsedLat;
-        lng = parsedLng;
-      }
+    // Without GPS we geocode the address (falling back to the state's main city) instead of
+    // saving a fake point in the middle of Nigeria, which made them invisible to every
+    // "near me" search.
+    let lat; let lng; let geoSource;
+    const parsedLat = latitude != null ? parseFloat(latitude) : NaN;
+    const parsedLng = longitude != null ? parseFloat(longitude) : NaN;
+    if (!isNaN(parsedLat) && !isNaN(parsedLng) &&
+        parsedLat >= -90 && parsedLat <= 90 &&
+        parsedLng >= -180 && parsedLng <= 180 &&
+        !(parsedLat === 0 && parsedLng === 0)) {
+      lat = parsedLat; lng = parsedLng; geoSource = 'gps';
+    } else {
+      const g = await geocodeNigeria({ address, lga, state });
+      lat = g.lat; lng = g.lng; geoSource = g.source;
     }
 
     const profile = await ArtisanProfile.findOne({ userId: req.user._id });
@@ -194,6 +194,7 @@ exports.updateLocation = async (req, res) => {
       address,
       state,
       lga: lga || null,
+      geoSource,
     };
     profile.completedSteps.location = true;
 
@@ -549,14 +550,24 @@ exports.updateArtisanProfile = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Address and state are required.' });
       }
 
-      // Preserve existing coordinates when new GPS isn't provided
-      let coords = profile.location?.coordinates || [8.6753, 9.082];
+      // New GPS wins. Otherwise keep the existing coordinates — unless they are the old
+      // "centre of Nigeria" placeholder or the artisan moved state, in which case geocode.
+      let coords = profile.location?.coordinates;
+      let geoSource = profile.location?.geoSource;
+      let gotGps = false;
       if (latitude != null && longitude != null) {
         const lat = parseFloat(latitude);
         const lng = parseFloat(longitude);
         if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
           coords = [lng, lat];
+          geoSource = 'gps';
+          gotGps = true;
         }
+      }
+      if (!gotGps && (isDefaultCoords(coords) || profile.location?.state !== state.trim())) {
+        const g = await geocodeNigeria({ address: address.trim(), lga: lga?.trim(), state: state.trim() });
+        coords = [g.lng, g.lat];
+        geoSource = g.source;
       }
 
       update.location = {
@@ -565,6 +576,7 @@ exports.updateArtisanProfile = async (req, res) => {
         address: address.trim(),
         state: state.trim(),
         lga: lga?.trim() || null,
+        ...(geoSource ? { geoSource } : {}),
       };
       update['completedSteps.location'] = true;
     }

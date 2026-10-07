@@ -111,6 +111,8 @@ server.listen(PORT, () => {
   console.log(`FixNG server running on port ${PORT}`);
   // Start subscription lifecycle tick job
   require('./jobs/subscriptionTick')();
+  // Daily "finish your profile" reminders (off unless ONBOARDING_REMINDERS=true)
+  require('./jobs/onboardingReminder')();
 });
 
 module.exports = app;

@@ -15,6 +15,7 @@ const Review = require('../models/Review');
 const Job = require('../models/Job');
 const User = require('../models/User');
 const { notify } = require('./notificationController');
+const { isDefaultCoords } = require('../utils/nigeriaGeo');
 
 // ─── GET /api/artisans — Search nearby verified artisans ─────────────────────
 // Query params: category, latitude, longitude, maxDistance (km), minRating, page
@@ -107,7 +108,11 @@ exports.searchArtisans = async (req, res) => {
       .filter((p) => p.userId != null)  // skip orphaned profiles whose user was deleted
       .map((p) => {
       let distanceKm = null;
-      if (userLat && userLng && p.location?.coordinates?.length === 2) {
+      // Only report a distance when the artisan's point is trustworthy: not the old
+      // "centre of Nigeria" placeholder and not just their state's main city.
+      const coordsReliable = !isDefaultCoords(p.location?.coordinates) &&
+        p.location?.geoSource !== 'state' && p.location?.geoSource !== 'default';
+      if (userLat && userLng && coordsReliable && p.location?.coordinates?.length === 2) {
         const [artisanLng, artisanLat] = p.location.coordinates;
         distanceKm = Math.round(haversineKm(userLat, userLng, artisanLat, artisanLng) * 10) / 10;
       }

@@ -35,6 +35,9 @@ const ArtisanProfileSchema = new mongoose.Schema(
       address: { type: String, default: null },
       state: { type: String, default: null },
       lga: { type: String, default: null }, // Local Government Area
+      // How trustworthy the coordinates are: 'gps' (device), 'address' / 'lga' (geocoded),
+      // 'state' (state's main city), 'default' (unknown). Absent on older profiles.
+      geoSource: { type: String, enum: ['gps', 'address', 'lga', 'state', 'default'], default: undefined },
     },
 
     // Step 4 — Verification ID
@@ -84,6 +87,13 @@ const ArtisanProfileSchema = new mongoose.Schema(
     onboardingComplete: {
       type: Boolean,
       default: false,
+    },
+
+    // Outreach emails already sent — stops the same person being emailed twice
+    outreach: {
+      welcomeSentAt:  { type: Date, default: null },  // "welcome, app is at onboarding stage" email
+      reminderCount:  { type: Number, default: 0 },   // "finish your profile" reminders
+      lastReminderAt: { type: Date, default: null },
     },
 
     // Verification status — artisan CANNOT receive jobs until 'verified'
