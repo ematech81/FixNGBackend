@@ -16,128 +16,89 @@ const Job = require('../models/Job');
 const User = require('../models/User');
 const { notify } = require('./notificationController');
 const { isDefaultCoords } = require('../utils/nigeriaGeo');
+const { searchableQuery } = require('../utils/artisanVisibility');
+const { findArtisansPage } = require('../services/artisanSearch');
 
-// ─── GET /api/artisans — Search nearby verified artisans ─────────────────────
-// Query params: category, latitude, longitude, maxDistance (km), minRating, page
+// ─── GET /api/artisans — List verified artisans, nearest first ───────────────
+// Query params: latitude + longitude (turns on nearest-first), category, state, q (name/skill text),
+//   minRating, isPro, page, limit, and OPTIONALLY maxDistance (km) as a hard radius.
+// Returns EVERY visible artisan across pages (see services/artisanSearch.js for the guarantees).
 exports.searchArtisans = async (req, res) => {
   try {
-    const { category, latitude, longitude } = req.query;
-    const minRating  = parseFloat(req.query.minRating) || 0;
-    const page       = Math.max(1, parseInt(req.query.page)        || 1);
-    const limit      = Math.min(50,  Math.max(1, parseInt(req.query.limit)       || 20));
-    const maxDistance = Math.min(200, Math.max(1, parseFloat(req.query.maxDistance) || 20));
+    const { category } = req.query;
+    const minRating = parseFloat(req.query.minRating) || 0;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip  = (page - 1) * limit;
+    const lat = parseFloat(req.query.latitude);
+    const lng = parseFloat(req.query.longitude);
+    // A radius is applied ONLY when the client asks for one. (It used to default to 20 km, which hid
+    // artisans in other cities and made the marketplace look empty.)
+    const radiusAsked = parseFloat(req.query.maxDistance);
+    const maxDistanceKm = radiusAsked > 0 ? Math.min(200, Math.max(1, radiusAsked)) : null;
+    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    const skip = (page - 1) * limit;
+    // The shared definition of "visible" — also used by the admin dashboard count
+    const query = await searchableQuery();
 
-    // Build query — list only artisans whose public profile page actually works:
-    // verified (getArtisanProfile 404s for anyone else) and with at least one skill.
-    // Unfinished onboarding profiles used to appear as dead "Artisan"/"Nigeria" cards.
-    const query = {
-      isSuspended: { $ne: true },
-      isBanned: { $ne: true },
-      verificationStatus: 'verified',
-      'skills.0': { $exists: true },
-    };
+    if (category) query.skills = category;
+    if (minRating > 0) query['stats.averageRating'] = { $gte: minRating };
+    if (req.query.isPro === 'true') query.isPro = true;
 
-    if (category) {
-      query.skills = category;
+    // State filter (exact, case-insensitive) — done here so paging stays correct with it
+    const stateFilter = (req.query.state || '').toString().trim();
+    if (stateFilter) query['location.state'] = new RegExp(`^${escapeRegex(stateFilter)}$`, 'i');
+
+    // Free-text search over skills and the artisan's name — also here, for the same reason
+    const text = (req.query.q || '').toString().trim().slice(0, 60);
+    if (text) {
+      const rx = new RegExp(escapeRegex(text), 'i');
+      const named = await User.find({ role: 'artisan', name: rx }).select('_id').limit(500).lean();
+      query.$and = [{ $or: [{ skills: rx }, { userId: { $in: named.map((u) => u._id) } }] }];
     }
 
-    if (minRating > 0) {
-      query['stats.averageRating'] = { $gte: parseFloat(minRating) };
-    }
-
-    // Filter to only Trusted (subscribed) artisans when requested
-    if (req.query.isPro === 'true') {
-      query.isPro = true;
-    }
-
-    let profiles;
-
-    if (latitude && longitude) {
-      const lat = parseFloat(latitude);
-      const lng = parseFloat(longitude);
-      const radiusMeters = parseFloat(maxDistance) * 1000;
-
-      // $near doesn't support multi-key sort, so we fetch and sort in-memory.
-      // Pool of 500 supports ~25 pages of 20 — enough for the densest Nigerian cities.
-      // Previously capped at 60 (3 pages max), which silently truncated results.
-      const fetchLimit = Math.min(500, limit * 10);
-      const raw = await ArtisanProfile.find({
-        ...query,
-        location: {
-          $near: {
-            $geometry: { type: 'Point', coordinates: [lng, lat] },
-            $maxDistance: radiusMeters,
-          },
-        },
-      })
-        .populate('userId', 'name')
-        .select('userId profilePhoto skills bio location stats badgeLevel isPro proSource')
-        .limit(fetchLimit)
-        .lean();
-
-      // Sort: 3-tier ordering — Pro first, verified non-Pro second, unverified last.
-      // Uses badgeLevel (already in select) rather than verificationStatus (not selected).
-      //   Tier 2 = isPro active
-      //   Tier 1 = verified/trusted badge, no active subscription
-      //   Tier 0 = new (unverified)
-      // Within each tier: higher rating first; distance is preserved by $near pre-sort.
-      raw.sort((a, b) => {
-        const tierA = a.isPro ? 2 : (a.badgeLevel === 'verified' || a.badgeLevel === 'trusted') ? 1 : 0;
-        const tierB = b.isPro ? 2 : (b.badgeLevel === 'verified' || b.badgeLevel === 'trusted') ? 1 : 0;
-        if (tierB !== tierA) return tierB - tierA;
-        return (b.stats?.averageRating ?? 0) - (a.stats?.averageRating ?? 0);
-      });
-      profiles = raw.slice(skip, skip + parseInt(limit));
-    } else {
-      // No location — Pro first, then by rating desc
-      profiles = await ArtisanProfile.find(query)
-        .sort({ isPro: -1, verificationStatus: -1, 'stats.averageRating': -1, 'stats.completedJobs': -1 })
-        .populate('userId', 'name')
-        .select('userId profilePhoto skills bio location stats badgeLevel isPro proSource')
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean();
-    }
-
-    const userLat = latitude ? parseFloat(latitude) : null;
-    const userLng = longitude ? parseFloat(longitude) : null;
+    const { profiles, total } = await findArtisansPage({ query, lat, lng, maxDistanceKm, page, limit });
 
     const artisans = profiles
-      .filter((p) => p.userId != null)  // skip orphaned profiles whose user was deleted
+      .filter((p) => p.userId?._id)   // defensive: the query already excludes deleted accounts
       .map((p) => {
-      let distanceKm = null;
-      // Only report a distance when the artisan's point is trustworthy: not the old
-      // "centre of Nigeria" placeholder and not just their state's main city.
-      const coordsReliable = !isDefaultCoords(p.location?.coordinates) &&
-        p.location?.geoSource !== 'state' && p.location?.geoSource !== 'default';
-      if (userLat && userLng && coordsReliable && p.location?.coordinates?.length === 2) {
-        const [artisanLng, artisanLat] = p.location.coordinates;
-        distanceKm = Math.round(haversineKm(userLat, userLng, artisanLat, artisanLng) * 10) / 10;
-      }
-      return {
-        id: p.userId?._id,
-        name: p.userId?.name,
-        profilePhoto: p.profilePhoto?.url || null,
-        skills: p.skills,
-        bio: p.bio,
-        address: p.location?.address || null,
-        state: p.location?.state || null,
-        lga: p.location?.lga || null,
-        badgeLevel: p.badgeLevel,
-        isPro: p.isPro || false,
-        distanceKm,
-        stats: {
-          completedJobs: p.stats.completedJobs,
-          averageRating: p.stats.averageRating,
-          totalRatings: p.stats.totalRatings,
-          avgResponseTimeMinutes: p.stats.avgResponseTimeMinutes,
-        },
-      };
-    });
+        let distanceKm = null;
+        // Only report a distance when the artisan's point is trustworthy: not the old
+        // "centre of Nigeria" placeholder and not just their state's main city.
+        const coordsReliable = !isDefaultCoords(p.location?.coordinates) &&
+          p.location?.geoSource !== 'state' && p.location?.geoSource !== 'default';
+        if (Number.isFinite(lat) && Number.isFinite(lng) && coordsReliable && p.location?.coordinates?.length === 2) {
+          const [artisanLng, artisanLat] = p.location.coordinates;
+          distanceKm = Math.round(haversineKm(lat, lng, artisanLat, artisanLng) * 10) / 10;
+        }
+        return {
+          id: p.userId._id,
+          name: p.userId.name,
+          profilePhoto: p.profilePhoto?.url || null,
+          skills: p.skills,
+          bio: p.bio,
+          address: p.location?.address || null,
+          state: p.location?.state || null,
+          lga: p.location?.lga || null,
+          badgeLevel: p.badgeLevel,
+          isPro: p.isPro || false,
+          distanceKm,
+          stats: {
+            completedJobs: p.stats.completedJobs,
+            averageRating: p.stats.averageRating,
+            totalRatings: p.stats.totalRatings,
+            avgResponseTimeMinutes: p.stats.avgResponseTimeMinutes,
+          },
+        };
+      });
 
-    res.status(200).json({ success: true, count: artisans.length, data: artisans });
+    res.status(200).json({
+      success: true,
+      count: artisans.length,
+      data: artisans,
+      // For "Load More": `total` = everything matching the filters, `hasMore` = another page exists
+      pagination: { page, limit, total, hasMore: skip + limit < total },
+    });
   } catch (err) {
     console.error('searchArtisans error:', err);
     res.status(500).json({ success: false, message: 'Search failed. Please try again.' });

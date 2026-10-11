@@ -7,6 +7,7 @@ const Review = require('../models/Review');
 const Announcement = require('../models/Announcement');
 const Notification = require('../models/Notification');
 const { emailUser } = require('../utils/emailNotifications');
+const { searchableQuery } = require('../utils/artisanVisibility');
 const { emitToUser } = require('../socket');
 const { notify } = require('./notificationController');
 
@@ -787,7 +788,9 @@ exports.getDashboardStats = async (req, res) => {
       openComplaints,
     ] = await Promise.all([
       User.countDocuments({ role: { $in: ['customer', 'artisan'] } }),
-      ArtisanProfile.countDocuments({ verificationStatus: 'verified' }),
+      // The SAME rule the public search uses (utils/artisanVisibility.js), so this number always
+      // equals the "N artisans available" customers see.
+      ArtisanProfile.countDocuments(await searchableQuery()),
       ArtisanProfile.countDocuments({ verificationStatus: 'pending' }),
       Job.countDocuments(),
       Job.countDocuments({ status: { $in: ['pending', 'accepted', 'in-progress'] } }),
