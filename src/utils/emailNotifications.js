@@ -79,17 +79,26 @@ const render = ({ heading, paragraphs, cta }) => {
 // ── Templates ─────────────────────────────────────────────────────────────────
 // Each returns { subject, heading, paragraphs, cta? }.
 const TEMPLATES = {
+  // Sent right after registration. Artisans also learn where FixNG is in its journey, so they know
+  // why jobs are not flowing yet and what to do in the meantime.
   welcome: ({ name, role }) => ({
-    subject: 'Welcome to FixNG',
+    subject: role === 'artisan' ? 'Welcome to FixNG — here’s what happens next' : 'Welcome to FixNG',
     heading: `Welcome to FixNG, ${firstName(name)}!`,
     paragraphs: role === 'artisan'
       ? [
-          'Your artisan account is ready. Complete your profile — photo, skills and location — so customers near you can find and book you.',
+          'Thank you for joining FixNG as an artisan. We’re glad to have you.',
+          'Here’s where we are: FixNG is in its onboarding stage. We’re bringing in artisans like you first, and customers are now joining and searching for professionals on the platform. Very soon, as customers book, job requests will start reaching you.',
+          'To be ready when they do:',
+          '• Finish setting up your profile — a clear photo, your skills, your location and a short bio. Customers only see complete profiles.',
+          '• Turn on alerts on your dashboard, so you hear about a job the moment it arrives.',
+          'We’ll keep you updated as we grow. If you have any questions, just reply to this email.',
         ]
       : [
           'Your account is ready. Find verified artisans and professionals near you — plumbers, electricians, lawyers, engineers and more.',
         ],
-    cta: { label: 'Open FixNG', url: SITE_URL },
+    cta: role === 'artisan'
+      ? { label: 'Complete my profile', url: `${SITE_URL}/artisan/onboarding` }
+      : { label: 'Open FixNG', url: SITE_URL },
   }),
 
   artisan_verified: ({ name }) => ({

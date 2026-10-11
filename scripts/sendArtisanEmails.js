@@ -30,6 +30,8 @@ const writePreviews = (dir) => {
   const samples = [
     ['1-finish-your-profile.html', 'artisan_complete_profile', { name: 'Ada Obi', missing: ['Choose your skills and write a short bio', 'Set your location', 'Upload your ID and a short skill video (you can skip these two)'] }],
     ['2-official-welcome.html', 'artisan_welcome_onboarding', { name: 'Ada Obi' }],
+    ['3-registration-welcome-artisan.html', 'welcome', { name: 'Ada Obi', role: 'artisan' }],
+    ['4-registration-welcome-customer.html', 'welcome', { name: 'Chi Okeke', role: 'customer' }],
   ];
   for (const [file, template, vars] of samples) {
     const { subject, html } = outreach.build(template, vars);
