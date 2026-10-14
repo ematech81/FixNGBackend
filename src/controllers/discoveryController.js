@@ -44,6 +44,7 @@ exports.searchArtisans = async (req, res) => {
     if (category) query.skills = category;
     if (minRating > 0) query['stats.averageRating'] = { $gte: minRating };
     if (req.query.isPro === 'true') query.isPro = true;
+    if (req.query.verified === 'true') query.idStatus = 'approved';   // ID-verified (has the tick)
 
     // State filter (exact, case-insensitive) — done here so paging stays correct with it
     const stateFilter = (req.query.state || '').toString().trim();

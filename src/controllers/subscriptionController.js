@@ -56,12 +56,16 @@ exports.initializeSubscription = async (req, res) => {
     return res.status(400).json({ success: false, message: 'cycle must be monthly, quarterly, or yearly.' });
   }
 
-  // Only verified artisans can subscribe
-  const profile = await ArtisanProfile.findOne({ userId: req.user._id }).select('verificationStatus').lean();
-  if (!profile || profile.verificationStatus !== 'verified') {
+  // Only ID-verified artisans can subscribe
+  const profile = await ArtisanProfile.findOne({ userId: req.user._id }).select('verificationStatus idStatus').lean();
+  if (!profile || profile.verificationStatus !== 'verified' || profile.idStatus !== 'approved') {
     return res.status(403).json({
       success: false,
-      message: 'Your artisan account must be verified before subscribing.',
+      code: 'ID_VERIFICATION_REQUIRED',
+      idStatus: profile?.idStatus || 'none',
+      message: profile?.idStatus === 'pending'
+        ? 'Your ID is still being reviewed. You can upgrade to Pro as soon as your account is verified.'
+        : 'Verify your account with a valid ID before upgrading to Pro.',
     });
   }
 

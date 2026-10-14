@@ -104,6 +104,16 @@ const ArtisanProfileSchema = new mongoose.Schema(
       default: 'incomplete',
     },
 
+    // ID verification — separate from verificationStatus (which only means "profile is complete and
+    // visible"). The verified badge/tick and Pro both require idStatus === 'approved'.
+    // none: no ID uploaded | pending: uploaded, awaiting admin | approved | rejected
+    idStatus: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'rejected'],
+      default: 'none',
+    },
+    idRejectionReason: { type: String, default: null },
+
     // Admin fills this on rejection so artisan knows why
     rejectionReason: {
       type: String,
@@ -202,14 +212,14 @@ ArtisanProfileSchema.pre('save', function (next) {
     this.onboardingComplete = true;
   }
 
-  // Auto-approve when all steps are complete — no manual admin review required.
-  // ID verification is optional; skipping it does not block approval.
+  // Profile goes live (visible in search) when all steps are complete. ID is optional for that —
+  // but the badge below needs an approved ID.
   if (allDone && this.verificationStatus === 'incomplete') {
     this.verificationStatus = 'verified';
   }
 
-  // Auto-compute badge level
-  if (this.verificationStatus === 'verified') {
+  // Auto-compute badge level: only an artisan whose ID was approved gets the tick
+  if (this.verificationStatus === 'verified' && this.idStatus === 'approved') {
     const completed = this.stats.completedJobs;
     const avgRating = this.stats.averageRating;
     if (completed >= 10 && avgRating >= 3.5) {

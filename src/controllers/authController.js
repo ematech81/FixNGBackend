@@ -19,7 +19,7 @@ const buildAuthResponse = async (user, statusCode, res) => {
   let artisanProfile = null;
   if (user.role === 'artisan') {
     artisanProfile = await ArtisanProfile.findOne({ userId: user._id }).select(
-      'verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel ' +
+      'verificationStatus idStatus onboardingComplete completedSteps skippedSteps stats badgeLevel ' +
       'isSuspended suspensionReason isBanned banReason rejectionReason'
     );
   }
@@ -617,7 +617,7 @@ exports.getMe = async (req, res) => {
 
     if (user.role === 'artisan') {
       const raw = await ArtisanProfile.findOne({ userId: user._id })
-        .select('verificationStatus onboardingComplete completedSteps skippedSteps stats badgeLevel isPro proSource profilePhoto bio skills location')
+        .select('verificationStatus idStatus idRejectionReason onboardingComplete completedSteps skippedSteps stats badgeLevel isPro proSource profilePhoto bio skills location')
         .lean();
       if (raw) {
         artisanProfile = {

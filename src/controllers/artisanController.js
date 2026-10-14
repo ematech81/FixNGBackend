@@ -37,6 +37,8 @@ exports.getOnboardingStatus = async (req, res) => {
       success: true,
       data: {
         verificationStatus: profile.verificationStatus,
+        idStatus: profile.idStatus || 'none',
+        idRejectionReason: profile.idRejectionReason || null,
         onboardingComplete: profile.onboardingComplete,
         completedSteps: profile.completedSteps,
         skippedSteps: profile.skippedSteps,
@@ -261,16 +263,21 @@ exports.uploadVerificationId = async (req, res) => {
       profile.rejectionReason = null;
     }
 
+    // Every (re)upload goes to admin review; the tick is given only on approval
+    profile.idStatus = 'pending';
+    profile.idRejectionReason = null;
+
     await profile.save();
 
     res.status(200).json({
       success: true,
-      message: 'Verification ID uploaded.',
+      message: 'ID uploaded. We will review it and verify your account shortly.',
       data: {
         idType: profile.verificationId.idType,
         uploadedAt: profile.verificationId.uploadedAt,
         completedSteps: profile.completedSteps,
         verificationStatus: profile.verificationStatus,
+        idStatus: profile.idStatus,
       },
     });
   } catch (err) { 

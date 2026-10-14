@@ -206,6 +206,8 @@ exports.verifyArtisan = async (req, res) => {
     if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
 
     profile.verificationStatus = 'verified';
+    profile.idStatus = 'approved';        // admin approval is what gives the badge and unlocks Pro
+    profile.idRejectionReason = null;
     profile.rejectionReason = null;
     profile.reviewedAt = new Date();
     await profile.save();
@@ -240,6 +242,8 @@ exports.rejectArtisan = async (req, res) => {
     if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
 
     profile.verificationStatus = 'rejected';
+    profile.idStatus = 'rejected';
+    profile.idRejectionReason = reason.trim();
     profile.rejectionReason = reason.trim();
     profile.reviewedAt = new Date();
     await profile.save();
