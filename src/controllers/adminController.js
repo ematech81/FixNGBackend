@@ -61,6 +61,7 @@ exports.getArtisans = async (req, res) => {
 
     const query = {};
     if (status)               query.verificationStatus = status;
+    if (req.query.idStatus)   query.idStatus = req.query.idStatus;   // ID review queue: idStatus=pending
     if (isPro === 'true')     query.isPro = true;
     if (isVerified === 'true') query.verificationStatus = 'verified';
 
@@ -95,6 +96,7 @@ exports.getArtisans = async (req, res) => {
       email: p.userId?.email,
       artisanCode: p.userId?.artisanCode,
       verificationStatus: p.verificationStatus,
+      idStatus: p.idStatus || 'none',
       badgeLevel: p.badgeLevel,
       isPro: p.isPro,
       proSource: p.proSource ?? null,
@@ -241,7 +243,8 @@ exports.rejectArtisan = async (req, res) => {
     const profile = await ArtisanProfile.findOne({ userId: req.params.artisanUserId });
     if (!profile) return res.status(404).json({ success: false, message: 'Artisan not found.' });
 
-    profile.verificationStatus = 'rejected';
+    // Rejecting an ID from the review queue must not hide an otherwise-live profile
+    if (profile.idStatus !== 'pending') profile.verificationStatus = 'rejected';
     profile.idStatus = 'rejected';
     profile.idRejectionReason = reason.trim();
     profile.rejectionReason = reason.trim();
@@ -795,7 +798,7 @@ exports.getDashboardStats = async (req, res) => {
       // The SAME rule the public search uses (utils/artisanVisibility.js), so this number always
       // equals the "N artisans available" customers see.
       ArtisanProfile.countDocuments(await searchableQuery()),
-      ArtisanProfile.countDocuments({ verificationStatus: 'pending' }),
+      ArtisanProfile.countDocuments({ idStatus: 'pending' }),
       Job.countDocuments(),
       Job.countDocuments({ status: { $in: ['pending', 'accepted', 'in-progress'] } }),
       Complaint.countDocuments({ status: 'open' }),
