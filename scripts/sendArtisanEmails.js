@@ -32,6 +32,7 @@ const writePreviews = (dir) => {
     ['2-official-welcome.html', 'artisan_welcome_onboarding', { name: 'Ada Obi' }],
     ['3-registration-welcome-artisan.html', 'welcome', { name: 'Ada Obi', role: 'artisan' }],
     ['4-registration-welcome-customer.html', 'welcome', { name: 'Chi Okeke', role: 'customer' }],
+    ['5-growth-notice-all-artisans.html', 'artisan_growth_notice', { name: 'Ada Obi' }],
   ];
   for (const [file, template, vars] of samples) {
     const { subject, html } = outreach.build(template, vars);
@@ -69,8 +70,8 @@ const sendTest = async (to) => {
   }
 
   const audience = arg('audience');
-  if (!['incomplete', 'verified'].includes(audience)) {
-    console.log('Usage: --audience=incomplete|verified  [--send] [--limit=N]   or   --preview=<folder>');
+  if (!['incomplete', 'verified', 'all'].includes(audience)) {
+    console.log('Usage: --audience=incomplete|verified|all  [--send] [--limit=N]   or   --preview=<folder>');
     process.exit(1);
   }
   const SEND = arg('send') === true;
@@ -78,7 +79,9 @@ const sendTest = async (to) => {
 
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
 
-  let targets = audience === 'incomplete' ? await outreach.findIncomplete() : await outreach.findVerifiedNotWelcomed();
+  let targets = audience === 'incomplete' ? await outreach.findIncomplete()
+    : audience === 'all' ? await outreach.findAllNotGrowthNotified()   // each person is recorded, so nobody gets it twice
+    : await outreach.findVerifiedNotWelcomed();
   // Never email the same person a reminder twice from this script (the welcome is already
   // de-duplicated by findVerifiedNotWelcomed). The automatic daily job handles follow-ups.
   if (audience === 'incomplete') targets = targets.filter((t) => !(t.profile.outreach?.reminderCount > 0));
@@ -88,14 +91,18 @@ const sendTest = async (to) => {
   console.log(`${SEND ? 'SENDING' : 'DRY RUN'} — audience: ${audience} — ${total} artisans with an email${total > targets.length ? `, limited to ${targets.length}` : ''}`);
   console.log(audience === 'incomplete'
     ? 'Email: "Finish setting up your FixNG profile" (lists what each person still has to do)'
-    : 'Email: "Welcome to FixNG — you\'re officially on board" (app is at onboarding stage)');
+    : audience === 'all'
+      ? 'Email: "FixNG is growing — get ready for your first orders"'
+      : 'Email: "Welcome to FixNG — you\'re officially on board" (app is at onboarding stage)');
 
   let sent = 0; let failed = 0;
   for (const t of targets) {
     const detail = audience === 'incomplete' ? `  missing ${outreach.missingSteps(t.profile).length} step(s), reminders so far: ${t.profile.outreach?.reminderCount || 0}` : '';
     if (!SEND) { console.log(`  would send to ${maskEmail(t.user.email)}${detail}`); continue; }
     try {
-      if (audience === 'incomplete') await outreach.sendCompleteProfile(t); else await outreach.sendWelcome(t);
+      if (audience === 'incomplete') await outreach.sendCompleteProfile(t);
+      else if (audience === 'all') await outreach.sendGrowthNotice(t);
+      else await outreach.sendWelcome(t);
       sent += 1;
       console.log(`  sent    ${maskEmail(t.user.email)}`);
     } catch (e) {

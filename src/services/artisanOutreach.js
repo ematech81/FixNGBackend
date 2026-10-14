@@ -48,6 +48,17 @@ const findVerifiedNotWelcomed = async () => {
     .filter((x) => x.user);
 };
 
+/** Every active artisan with an email who hasn't had the "FixNG is growing" notice yet. */
+const findAllNotGrowthNotified = async () => {
+  const profiles = await ArtisanProfile.find({ 'outreach.growthNoticeSentAt': null }).select('userId outreach').lean();
+  const users = await User.find({ _id: { $in: profiles.map((p) => p.userId) }, role: 'artisan', isActive: { $ne: false }, email: { $ne: null } })
+    .select('name email').lean();
+  const byId = new Map(users.map((u) => [String(u._id), u]));
+  return profiles
+    .map((p) => ({ user: byId.get(String(p.userId)), profile: p }))
+    .filter((x) => x.user);
+};
+
 const build = (template, vars) => {
   const { subject, heading, paragraphs, cta } = TEMPLATES[template](vars);
   return { subject, ...render({ heading, paragraphs, cta }) };
@@ -73,4 +84,10 @@ const sendWelcome = async ({ user, profile }) => {
   await ArtisanProfile.updateOne({ _id: profile._id }, { $set: { 'outreach.welcomeSentAt': new Date() } });
 };
 
-module.exports = { missingSteps, findIncomplete, findVerifiedNotWelcomed, build, sendCompleteProfile, sendWelcome };
+/** Send the "FixNG is growing" notice and record it. Throws if the send fails. */
+const sendGrowthNotice = async ({ user, profile }) => {
+  await deliver(user, 'artisan_growth_notice', {});
+  await ArtisanProfile.updateOne({ _id: profile._id }, { $set: { 'outreach.growthNoticeSentAt': new Date() } });
+};
+
+module.exports = { missingSteps, findIncomplete, findVerifiedNotWelcomed, findAllNotGrowthNotified, build, sendCompleteProfile, sendWelcome, sendGrowthNotice };

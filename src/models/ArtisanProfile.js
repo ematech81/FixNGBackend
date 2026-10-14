@@ -92,6 +92,7 @@ const ArtisanProfileSchema = new mongoose.Schema(
     // Outreach emails already sent — stops the same person being emailed twice
     outreach: {
       welcomeSentAt:  { type: Date, default: null },  // "welcome, app is at onboarding stage" email
+      growthNoticeSentAt: { type: Date, default: null }, // "FixNG is growing — be ready for orders" email
       reminderCount:  { type: Number, default: 0 },   // "finish your profile" reminders
       lastReminderAt: { type: Date, default: null },
     },

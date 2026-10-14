@@ -152,6 +152,23 @@ const TEMPLATES = {
     cta: { label: 'View job', url: SITE_URL },
   }),
 
+  // One-off announcement to every artisan: the platform is growing, get ready for orders.
+  artisan_growth_notice: ({ name }) => ({
+    subject: 'FixNG is growing — get ready for your first orders',
+    heading: 'FixNG is growing — and you’re part of it',
+    paragraphs: [
+      `Hi ${firstName(name)}, thank you for being part of FixNG.`,
+      'We’re growing quickly: over 140 artisans have joined in just a few weeks, from 22 states, and more are on the way. Customers are joining too, and are now searching for professionals like you. Job requests will start reaching you soon.',
+      'Here’s how to be ready when they do:',
+      '• Turn on notifications. Open your dashboard and tap “Turn on” so you hear about a job the moment it arrives. In the mobile app, allow notifications when asked.',
+      '• Complete your profile. A clear photo, your skills, your location and a short bio. Only complete profiles show up to customers.',
+      '• Check your email. Job alerts come from info@fixng.com.ng — add it to your contacts, and look in your spam folder if you don’t see them.',
+      '• Reply quickly. When a job is posted near you, the first artisan to respond usually gets it.',
+      'We’ll keep you updated as we grow. If you have any questions, just reply to this email.',
+    ],
+    cta: { label: 'Open my dashboard', url: `${SITE_URL}/artisan/dashboard` },
+  }),
+
   // Sent to the OTHER party when a job is cancelled. `toRole` = the recipient's role.
   job_cancelled: ({ name, toRole, cancelledBy, category, reason }) => ({
     subject: `A ${category || ''} job was cancelled on FixNG`.replace('  ', ' '),
